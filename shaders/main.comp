@@ -1,0 +1,14 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform image2D out_image;
+
+
+void main() {
+    ivec2 imgSize = imageSize(out_image);
+    if (gl_GlobalInvocationID.x > imgSize.x || gl_GlobalInvocationID.y > imgSize.y) return;
+
+    vec2 normalizedPosition = vec2(gl_GlobalInvocationID.xy) / vec2(imgSize);
+    imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(normalizedPosition, 0, 1));
+}
