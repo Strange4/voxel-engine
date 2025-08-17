@@ -1,14 +1,42 @@
 #version 460
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "ray.comp"
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba8) uniform image2D out_image;
 
+const float viewportHeight = 2;
+const float focalLength = 1;
+
+vec3 rayColor(Ray ray) {
+    vec3 unit = normalize(ray.direction);
+    float t = 0.5 * (unit.y + 1);
+    // float t = unit.y;
+    vec3 startColor = vec3(0,0,0);
+    vec3 endColor = vec3(0.5, 0.5, 0.5);
+    return (1.0-t)*startColor + t*endColor;
+}
 
 void main() {
     ivec2 imgSize = imageSize(out_image);
     if (gl_GlobalInvocationID.x > imgSize.x || gl_GlobalInvocationID.y > imgSize.y) return;
 
-    vec2 normalizedPosition = vec2(gl_GlobalInvocationID.xy) / vec2(imgSize);
-    imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(normalizedPosition, 0, 1));
+    float aspectRatio = float(imgSize.x)/float(imgSize.y);
+    float viewportWidth = aspectRatio * viewportHeight;
+    vec3 cameraCenter = vec3(0,0,0);
+    vec3 viewportXVector = vec3(viewportWidth, 0, 0);
+    vec3 viewportYVector = vec3(0, -viewportHeight, 0);
+    vec3 pixelDeltaX = viewportXVector/imgSize.x;
+    vec3 pixelDeltaY = viewportYVector/imgSize.y;
+    vec3 viewportUpperLeft = cameraCenter - vec3(0, 0, focalLength) - viewportXVector/2 - viewportYVector/2;
+
+    vec3 topLeftPixel = viewportUpperLeft + 0.5 * (pixelDeltaX + pixelDeltaY);
+
+    vec3 pixelCenter = topLeftPixel + (gl_GlobalInvocationID.x * pixelDeltaX) + (gl_GlobalInvocationID.y * pixelDeltaY);
+    vec3 rayDirection = pixelCenter - cameraCenter;
+    Ray ray = Ray(cameraCenter, rayDirection);
+    imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(rayColor(ray), 1));
 }
