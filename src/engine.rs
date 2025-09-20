@@ -1,17 +1,23 @@
 use std::sync::Arc;
+use std::time::Duration;
 
-use vulkano::buffer::BufferContents;
+use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
-    PrimaryAutoCommandBuffer,
+    CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
 use vulkano::device::{Device, Queue};
+use vulkano::format::Format;
 use vulkano::image::view::ImageView;
-use vulkano::image::{Image, ImageCreateInfo, ImageUsage};
-use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
+use vulkano::image::{Image, ImageCreateInfo, ImageLayout, ImageType, ImageUsage};
+use vulkano::memory::DedicatedAllocation;
+use vulkano::memory::allocator::{
+    AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryTypeFilter,
+    StandardMemoryAllocator,
+};
 use vulkano::pipeline::compute::ComputePipelineCreateInfo;
 use vulkano::pipeline::graphics::vertex_input::Vertex;
 use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
@@ -32,16 +38,6 @@ use vulkano::sync::{self, GpuFuture};
 use crate::vulkan::starter::{
     get_device_and_queue, get_instance, get_physical_device_and_family_index, get_swapchain,
 };
-
-#[derive(BufferContents, Vertex)]
-#[repr(C)]
-struct MyVertex {
-    #[format(R32G32_SFLOAT)]
-    in_position: [f32; 2],
-
-    #[format(R32G32B32_SFLOAT)]
-    in_color: [f32; 3],
-}
 
 pub struct Engine {
     recreate_swapchain: bool,
@@ -138,7 +134,7 @@ impl Engine {
         };
 
         if suboptimal_image {
-            self.recreate_swapchain = true
+            self.recreate_swapchain = true;
         }
 
         if let Some(image_fence) = &self.fences[swap_image_index as usize] {
@@ -222,7 +218,7 @@ fn get_compute_command_buffers(
     images: &[Arc<Image>],
 ) -> Vec<Arc<PrimaryAutoCommandBuffer>> {
     let pipeline_layout = pipeline.layout();
-    let image_layout = pipeline_layout.set_layouts().get(0).unwrap();
+    let descriptor_set_layout = pipeline_layout.set_layouts().get(0).unwrap();
     let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
         device.clone(),
         Default::default(),
@@ -233,6 +229,10 @@ fn get_compute_command_buffers(
     ));
 
     let allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+
+    let model = create_model_and_fill(device.clone(), allocator.clone(), command_buffer_allocator.clone(), queue.clone());
+
+    let model_image_view = ImageView::new_default(model).unwrap();
 
     // https://www.reddit.com/r/vulkan/comments/pf2no9/why_should_descriptor_sets_be_per_swap_chain_image/ you are supposed to have one descriptor set per image in swap cahin
     images
@@ -255,8 +255,8 @@ fn get_compute_command_buffers(
             let output_image_view = ImageView::new_default(output_image.clone()).unwrap();
             let descriptor_set = DescriptorSet::new(
                 descriptor_set_allocator.clone(),
-                image_layout.clone(),
-                [WriteDescriptorSet::image_view(0, output_image_view.clone())],
+                descriptor_set_layout.clone(),
+                [WriteDescriptorSet::image_view(0, output_image_view.clone()), WriteDescriptorSet::image_view(1, model_image_view.clone())],
                 [],
             )
             .unwrap();
@@ -303,6 +303,83 @@ fn get_compute_command_buffers(
             builder.build().unwrap()
         })
         .collect::<Vec<_>>()
+}
+
+fn create_model_and_fill(
+    device: Arc<Device>,
+    allocator: Arc<GenericMemoryAllocator<FreeListAllocator>>,
+    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    queue: Arc<Queue>,
+) -> Arc<Image> {
+    let diameter = 20;
+    let extent = [diameter; 3];
+    let image = Image::new(
+        allocator.clone(),
+        ImageCreateInfo {
+            image_type: ImageType::Dim3d,
+            format: Format::R8G8B8A8_UNORM,
+            extent: extent,
+            usage: ImageUsage::SAMPLED | ImageUsage::STORAGE | ImageUsage::TRANSFER_DST,
+            ..Default::default()
+        },
+        AllocationCreateInfo::default(),
+    )
+    .unwrap();
+
+    let buffer = Buffer::from_iter(
+        allocator.clone(),
+        BufferCreateInfo {
+            usage: BufferUsage::TRANSFER_SRC | BufferUsage::STORAGE_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_HOST | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        get_model_data(20),
+    )
+    .expect("Couldn't create buffer");
+
+    let mut builder = AutoCommandBufferBuilder::primary(
+        command_buffer_allocator,
+        queue.queue_family_index(),
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .unwrap();
+
+    builder
+        .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(buffer, image.clone()))
+        .unwrap();
+
+    let command_buffer = builder.build().unwrap();
+
+    sync::now(device.clone())
+        .then_execute(queue.clone(), command_buffer)
+        .unwrap()
+        .then_signal_fence_and_flush()
+        .unwrap()
+        .wait(Some(Duration::from_secs(3)))
+        .unwrap();
+    image
+}
+fn get_model_data(diameter: u32) -> Vec<u8> {
+    let mut data = vec![0; (diameter * 4 * diameter * diameter) as usize];
+    let radius = diameter / 2;
+    for z in 0..diameter {
+        for y in 0..diameter {
+            for x in 0..diameter {
+                let x_dist = (diameter / 2).abs_diff(x);
+                let y_dist = (diameter / 2).abs_diff(y);
+                let z_dist = (diameter / 2).abs_diff(z);
+                if (x_dist * x_dist + y_dist * y_dist + z_dist * z_dist) <= (radius * radius) {
+                    let begin = (z * diameter * diameter * 4) + (y * diameter * 4) + x * 4;
+                    let end = (z * diameter * diameter * 4) + (y * diameter * 4) + (x + 1) * 4;
+                    data[(begin as usize)..(end as usize)].fill(255);
+                }
+            }
+        }
+    }
+    data
 }
 
 mod cs {

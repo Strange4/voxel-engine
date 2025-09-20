@@ -2,3 +2,14 @@ struct Ray {
     vec3 origin;
     vec3 direction;
 };
+
+struct AABBHit {
+    bool hit;
+    float tmin;
+    float tmax;
+};
+
+struct AABB {
+    vec3 minPos;
+    vec3 maxPos;
+};
