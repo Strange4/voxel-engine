@@ -13,8 +13,9 @@ const float viewportHeight = 2;
 const float focalLength = 1;
 
 vec2 intersection(Ray ray, AABB aabb) {
-    vec3 tMin = (aabb.minPos - ray.origin) / ray.direction;
-    vec3 tMax = (aabb.maxPos - ray.origin) / ray.direction;
+    vec3 inverse = 1 / ray.direction;
+    vec3 tMin = (aabb.minPos - ray.origin) * inverse;
+    vec3 tMax = (aabb.maxPos - ray.origin) * inverse;
     vec3 t1 = min(tMin, tMax);
     vec3 t2 = max(tMin, tMax);
     float tNear = max(max(t1.x, t1.y), t1.z);
@@ -22,31 +23,83 @@ vec2 intersection(Ray ray, AABB aabb) {
     return vec2(tNear, tFar);
 }
 
+vec3 traverse_and_get_color(Ray ray, vec2 tMinMax) {
+    // 0 if the sign is -1.0 and 1 if the sign is 1.0
+    vec3 planeSelector = sign(ray.direction) / vec3(2) + vec3(1) / vec3(2);
+    float tMin = tMinMax.x;
+    float tMax = tMinMax.y;
+    vec3 currentPoint = floor(ray.origin + tMin * ray.direction);
+    vec3 endPoint = ray.origin + ray.direction * tMax;
+    // this will select the "next" plane that the ray will intersect with.
+    // See https://www.youtube.com/watch?v=ztkh1r1ioZo for more info
+    vec3 integerPlanes = currentPoint + planeSelector;
+    vec3 t = integerPlanes / ray.direction - ray.origin / ray.direction;
+    vec3 planeStep = sign(ray.direction);
+    vec3 tDelta = abs(1 / ray.direction);
+    uint steps = 0;
+    uvec3 imageSize = uvec3(imageSize(model));
+    float distanceBeforeOut = sqrt(3);
+
+    while (distance(ray.direction * t + ray.origin, endPoint) > distanceBeforeOut) {
+        steps++;
+        if (t.x < t.y) {
+            if (t.x < t.z) {
+                currentPoint.x += planeStep.x;
+                t.x += tDelta.x;
+            } else {
+                currentPoint.z += planeSelector.z;
+                t.z += tDelta.z;
+            }
+        } else {
+            if (t.y < t.z) {
+                currentPoint.y += planeStep.y;
+                t.y += tDelta.y;
+            } else {
+                currentPoint.z += planeSelector.z;
+                t.z += tDelta.z;
+            }
+        }
+    }
+    float maxSteps = float(imageSize.x + imageSize.y + imageSize.z);
+    float stepRatio = float(steps) / maxSteps;
+    return vec3(stepRatio);
+    // return vec3(normalize(t));
+}
+
 vec3 rayColor(Ray ray) {
+    vec3 modelPosition = vec3(10, 10, -30);
+    ivec3 modelSize = imageSize(model);
     vec3 unit = normalize(ray.direction);
     float t = 0.5 * (unit.x + 1);
-    vec4 voxel = imageLoad(model, ivec3(10,10,10));
-    vec3 startColor = vec3(0,0,0);
+    vec4 voxel = imageLoad(model, ivec3(10, 10, 10));
+    vec3 startColor = vec3(0, 0, 0);
     vec3 endColor = vec3(0.5, 0.5, 0.5);
-    return (1.0-t)*startColor + t*endColor;
+    // vec4 voxel = imageLoad(model, ivec3(10,10,10));
+    vec2 tMinMax = intersection(ray, AABB(modelPosition, modelPosition + modelSize));
+    float tMin = tMinMax.x;
+    float tMax = tMinMax.y;
+    if (tMin >= tMax) {
+        return (1.0 - t) * startColor + t * endColor;
+    }
+    return traverse_and_get_color(ray, tMinMax);
+    // vec3 startingPoint = ray.origin + tMin * ray.direction;
+    // return normalize(startingPoint);
 }
 
 void main() {
     ivec2 imgSize = imageSize(out_image);
-    if (gl_GlobalInvocationID.x > imgSize.x || gl_GlobalInvocationID.y > imgSize.y) return;
 
-    float aspectRatio = float(imgSize.x)/float(imgSize.y);
+    if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
+
+    float aspectRatio = float(imgSize.x) / float(imgSize.y);
     float viewportWidth = aspectRatio * viewportHeight;
-    vec3 cameraCenter = vec3(0,0,0);
-    vec3 viewportXVector = vec3(viewportWidth, 0, 0);
-    vec3 viewportYVector = vec3(0, -viewportHeight, 0);
-    vec3 pixelDeltaX = viewportXVector/imgSize.x;
-    vec3 pixelDeltaY = viewportYVector/imgSize.y;
-    vec3 viewportUpperLeft = cameraCenter - vec3(0, 0, focalLength) - viewportXVector/2 - viewportYVector/2;
+    vec3 cameraCenter = vec3(0, 0, 0);
+    vec2 viewportVector = vec2(viewportWidth, -viewportHeight);
+    vec2 pixelDelta = viewportVector / vec2(imgSize);
+    vec3 viewportUpperLeft = cameraCenter - vec3(0, 0, focalLength) - vec3(viewportVector, 0) * 0.5;
+    vec3 topLeftPixel = viewportUpperLeft + 0.5 * vec3(pixelDelta, 0);
 
-    vec3 topLeftPixel = viewportUpperLeft + 0.5 * (pixelDeltaX + pixelDeltaY);
-
-    vec3 pixelCenter = topLeftPixel + (gl_GlobalInvocationID.x * pixelDeltaX) + (gl_GlobalInvocationID.y * pixelDeltaY);
+    vec3 pixelCenter = topLeftPixel + gl_GlobalInvocationID.x * vec3(pixelDelta.x, 0, 0) + gl_GlobalInvocationID.y * vec3(0, pixelDelta.y, 0);
     vec3 rayDirection = pixelCenter - cameraCenter;
     Ray ray = Ray(cameraCenter, rayDirection);
     imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(rayColor(ray), 1));

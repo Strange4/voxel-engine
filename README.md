@@ -1,9 +1,7 @@
 # TODO
-### Create a 3D texture for tracing voxels
-You'll have to create a 3D texture and fill it with some data (to make a sphere). Then use the 3D tracing algorithm to find the color of that pixel.
 
 ### Make a moving camera
-Push the origin and direction of the camera.
+Push constants the origin and direction of the camera.
 
 
 ## Questions and answers.
@@ -21,3 +19,8 @@ When you pass those resources to the pipeline they aren't passed 1 by 1, they ar
 ###### What are descriptor sets layouts?
 
 Read up on previous question. The layout of a descriptor set is an array of all the bindings of the descriptor sets and they type.
+
+
+# DONE
+[x] Create a 3D texture for tracing voxels
+

@@ -311,7 +311,7 @@ fn create_model_and_fill(
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     queue: Arc<Queue>,
 ) -> Arc<Image> {
-    let diameter = 20;
+    let diameter = 10;
     let extent = [diameter; 3];
     let image = Image::new(
         allocator.clone(),
