@@ -15,7 +15,7 @@ const float focalLength = 1;
 vec2 intersection(Ray ray, AABB aabb) {
     vec3 inverse = 1 / ray.direction;
     vec3 tMin = (aabb.minPos - ray.origin) * inverse;
-    vec3 tMax = (aabb.maxPos - ray.origin) * inverse;
+    vec3 tMax = (aabb.minPos + aabb.size - ray.origin) * inverse;
     vec3 t1 = min(tMin, tMax);
     vec3 t2 = max(tMin, tMax);
     float tNear = max(max(t1.x, t1.y), t1.z);
@@ -23,7 +23,7 @@ vec2 intersection(Ray ray, AABB aabb) {
     return vec2(tNear, tFar);
 }
 
-vec3 traverse_and_get_color(Ray ray, vec2 tMinMax) {
+vec3 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
     // 0 if the sign is -1.0 and 1 if the sign is 1.0
     vec3 planeSelector = sign(ray.direction) / vec3(2) + vec3(1) / vec3(2);
     float tMin = tMinMax.x;
@@ -37,17 +37,18 @@ vec3 traverse_and_get_color(Ray ray, vec2 tMinMax) {
     vec3 planeStep = sign(ray.direction);
     vec3 tDelta = abs(1 / ray.direction);
     uint steps = 0;
-    uvec3 imageSize = uvec3(imageSize(model));
     float distanceBeforeOut = sqrt(3);
+    vec3 maxPoint = aabb.minPos + aabb.size;
 
-    while (distance(ray.direction * t + ray.origin, endPoint) > distanceBeforeOut) {
+    // while the current position falls within the bounding box
+    while (all(greaterThanEqual(currentPoint, aabb.minPos)) && all(lessThanEqual(currentPoint, maxPoint))) {
         steps++;
         if (t.x < t.y) {
             if (t.x < t.z) {
                 currentPoint.x += planeStep.x;
                 t.x += tDelta.x;
             } else {
-                currentPoint.z += planeSelector.z;
+                currentPoint.z += planeStep.z;
                 t.z += tDelta.z;
             }
         } else {
@@ -55,15 +56,14 @@ vec3 traverse_and_get_color(Ray ray, vec2 tMinMax) {
                 currentPoint.y += planeStep.y;
                 t.y += tDelta.y;
             } else {
-                currentPoint.z += planeSelector.z;
+                currentPoint.z += planeStep.z;
                 t.z += tDelta.z;
             }
         }
     }
-    float maxSteps = float(imageSize.x + imageSize.y + imageSize.z);
+    float maxSteps = float(aabb.size.x + aabb.size.y + aabb.size.z);
     float stepRatio = float(steps) / maxSteps;
     return vec3(stepRatio);
-    // return vec3(normalize(t));
 }
 
 vec3 rayColor(Ray ray) {
@@ -74,16 +74,14 @@ vec3 rayColor(Ray ray) {
     vec4 voxel = imageLoad(model, ivec3(10, 10, 10));
     vec3 startColor = vec3(0, 0, 0);
     vec3 endColor = vec3(0.5, 0.5, 0.5);
-    // vec4 voxel = imageLoad(model, ivec3(10,10,10));
-    vec2 tMinMax = intersection(ray, AABB(modelPosition, modelPosition + modelSize));
+    AABB aabb = AABB(modelPosition, modelSize);
+    vec2 tMinMax = intersection(ray, aabb);
     float tMin = tMinMax.x;
     float tMax = tMinMax.y;
     if (tMin >= tMax) {
         return (1.0 - t) * startColor + t * endColor;
     }
-    return traverse_and_get_color(ray, tMinMax);
-    // vec3 startingPoint = ray.origin + tMin * ray.direction;
-    // return normalize(startingPoint);
+    return traverse_and_get_color(ray, tMinMax, aabb);
 }
 
 void main() {
