@@ -16,13 +16,14 @@ pub struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let window_attributes = WindowAttributes::default()
+            .with_title("Voxel Engine");
         let window = Arc::new(
             event_loop
-                .create_window(WindowAttributes::default())
+                .create_window(window_attributes)
                 .unwrap(),
         );
         self.window = Some(window.clone());
-
         self.engine = Some(Engine::new(window))
     }
 

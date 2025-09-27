@@ -130,5 +130,5 @@ pub fn get_device_and_queue(
 
     let queue = queues.next().unwrap();
 
-    return (device, queue);
+    (device, queue)
 }

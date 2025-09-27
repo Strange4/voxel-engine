@@ -216,7 +216,7 @@ fn get_compute_command_buffers(
     images: &[Arc<Image>],
 ) -> Vec<Arc<PrimaryAutoCommandBuffer>> {
     let pipeline_layout = pipeline.layout();
-    let descriptor_set_layout = pipeline_layout.set_layouts().get(0).unwrap();
+    let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
     let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
         device.clone(),
         Default::default(),
@@ -228,7 +228,12 @@ fn get_compute_command_buffers(
 
     let allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
 
-    let model = create_model_and_fill(device.clone(), allocator.clone(), command_buffer_allocator.clone(), queue.clone());
+    let model = create_model_and_fill(
+        device.clone(),
+        allocator.clone(),
+        command_buffer_allocator.clone(),
+        queue.clone(),
+    );
 
     let model_image_view = ImageView::new_default(model).unwrap();
 
@@ -254,7 +259,10 @@ fn get_compute_command_buffers(
             let descriptor_set = DescriptorSet::new(
                 descriptor_set_allocator.clone(),
                 descriptor_set_layout.clone(),
-                [WriteDescriptorSet::image_view(0, output_image_view.clone()), WriteDescriptorSet::image_view(1, model_image_view.clone())],
+                [
+                    WriteDescriptorSet::image_view(0, output_image_view.clone()),
+                    WriteDescriptorSet::image_view(1, model_image_view.clone()),
+                ],
                 [],
             )
             .unwrap();
@@ -284,8 +292,8 @@ fn get_compute_command_buffers(
             unsafe {
                 builder
                     .dispatch([
-                        (extent[0] + workgroup_size - 1) / workgroup_size,
-                        (extent[1] + workgroup_size - 1) / workgroup_size,
+                        extent[0].div_ceil(workgroup_size),
+                        extent[1].div_ceil(workgroup_size),
                         1,
                     ])
                     .unwrap()
@@ -331,7 +339,8 @@ fn create_model_and_fill(
             ..Default::default()
         },
         AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_HOST | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            memory_type_filter: MemoryTypeFilter::PREFER_HOST
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
         get_model_data(20),
