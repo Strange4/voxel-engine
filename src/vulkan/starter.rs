@@ -54,6 +54,8 @@ pub fn get_swapchain(
     surface: Arc<Surface>,
     dimensions: PhysicalSize<u32>,
 ) -> (Arc<Swapchain>, Vec<Arc<Image>>) {
+    let max_push_constant_size = physical_device.properties().max_push_constants_size;
+    println!("Max size of push constants: {max_push_constant_size}mb");
     let caps = physical_device
         .surface_capabilities(&surface, Default::default())
         .unwrap();

@@ -1,11 +1,11 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
+use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
-    CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
+    CopyBufferToImageInfo, CopyImageInfo, PrimaryAutoCommandBuffer,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
@@ -39,12 +39,20 @@ use crate::vulkan::starter::{
 
 pub struct Engine {
     recreate_swapchain: bool,
-    previous_fence: usize,
-    command_buffers: Vec<Arc<PrimaryAutoCommandBuffer>>,
+
+    // This is here so that we can modify it every frame by the app.
+    push_constants: PushConstants,
+
+    // command_buffers: Vec<Arc<PrimaryAutoCommandBuffer>>,
+    descriptor_sets: Vec<Arc<DescriptorSet>>,
+    present_images: Vec<Arc<Image>>,
+    output_images: Vec<Arc<Image>>,
+    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     device: Arc<Device>,
     compute_pipeline: Arc<ComputePipeline>,
     swapchain: Arc<Swapchain>,
     queue: Arc<Queue>,
+    previous_fence: usize,
     fences: Vec<
         Option<
             Arc<
@@ -58,6 +66,12 @@ pub struct Engine {
             >,
         >,
     >,
+}
+
+#[repr(C)]
+#[derive(BufferContents, Clone, Copy)]
+struct PushConstants {
+    camera_position: [i32; 3],
 }
 
 impl Engine {
@@ -79,21 +93,34 @@ impl Engine {
 
         let compute_shader = cs::load(device.clone()).unwrap();
         let compute_pipeline = get_compute_pipeline(&device, &compute_shader);
+        let (output_images, descriptor_sets) =
+            create_descriptor_sets_and_output_images(&images, &compute_pipeline, &queue, &device);
 
         Self {
             recreate_swapchain: false,
             previous_fence: 0,
-            command_buffers: get_compute_command_buffers(
-                device.clone(),
-                &queue,
-                &compute_pipeline,
-                &images,
-            ),
-            device,
+
+            // command_buffers: get_compute_command_buffers(
+            //     device.clone(),
+            //     &queue,
+            //     &compute_pipeline,
+            //     &images,
+            // ),
+            device: device.clone(),
             compute_pipeline,
             swapchain,
             queue,
             fences: vec![None; images.len()],
+            push_constants: PushConstants {
+                camera_position: [0, 10, 30],
+            },
+            descriptor_sets,
+            output_images,
+            command_buffer_allocator: Arc::new(StandardCommandBufferAllocator::new(
+                device.clone(),
+                Default::default(),
+            )),
+            present_images: images,
         }
     }
 
@@ -110,12 +137,15 @@ impl Engine {
                 .unwrap();
             self.swapchain = new_swapchain;
             if window_resized {
-                self.command_buffers = get_compute_command_buffers(
-                    self.device.clone(),
-                    &self.queue,
-                    &self.compute_pipeline,
+                let (output_images, descriptor_sets) = create_descriptor_sets_and_output_images(
                     &new_images,
+                    &self.compute_pipeline,
+                    &self.queue,
+                    &self.device,
                 );
+                self.present_images = new_images;
+                self.output_images = output_images;
+                self.descriptor_sets = descriptor_sets;
             }
         }
 
@@ -148,24 +178,19 @@ impl Engine {
             Some(fence) => fence.boxed(),
         };
 
-        let execution: Result<
-            FenceSignalFuture<
-                PresentFuture<
-                    vulkano::command_buffer::CommandBufferExecFuture<
-                        sync::future::JoinFuture<
-                            Box<dyn GpuFuture>,
-                            swapchain::SwapchainAcquireFuture,
-                        >,
-                    >,
-                >,
-            >,
-            Validated<VulkanError>,
-        > = previous_future
+        let command_buffer = get_command_buffer(
+            self.push_constants,
+            self.descriptor_sets[swap_image_index as usize].clone(),
+            self.command_buffer_allocator.clone(),
+            self.present_images[swap_image_index as usize].clone(),
+            self.output_images[swap_image_index as usize].clone(),
+            &self.queue,
+            self.compute_pipeline.clone(),
+        );
+
+        let execution = previous_future
             .join(acquire_future)
-            .then_execute(
-                self.queue.clone(),
-                self.command_buffers[swap_image_index as usize].clone(),
-            )
+            .then_execute(self.queue.clone(), command_buffer)
             .unwrap()
             .then_swapchain_present(
                 self.queue.clone(),
@@ -182,7 +207,7 @@ impl Engine {
                 self.recreate_swapchain = true;
                 None
             }
-            Err(err) => panic!("{}", err),
+            Err(err) => panic!("{err}"),
         };
         self.previous_fence = swap_image_index as usize;
     }
@@ -207,6 +232,122 @@ fn get_compute_pipeline(
         ComputePipelineCreateInfo::stage_layout(stage, layout),
     )
     .unwrap()
+}
+
+// Gets the command buffer for a single dispatch of the compute shader.
+// This is done so that we can modify the push constants every frame.
+fn get_command_buffer(
+    push_constants: PushConstants,
+    descriptor_set: Arc<DescriptorSet>,
+    allocator: Arc<StandardCommandBufferAllocator>,
+    present_image: Arc<Image>,
+    output_image: Arc<Image>,
+    queue: &Arc<Queue>,
+    pipeline: Arc<ComputePipeline>,
+) -> Arc<PrimaryAutoCommandBuffer> {
+    let mut builder = AutoCommandBufferBuilder::primary(
+        allocator,
+        queue.queue_family_index(),
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .unwrap();
+    let pipeline_layout = pipeline.layout();
+
+    builder
+        .bind_pipeline_compute(pipeline.clone())
+        .unwrap()
+        .push_constants(pipeline_layout.clone(), 0, push_constants)
+        .unwrap()
+        .bind_descriptor_sets(
+            PipelineBindPoint::Compute,
+            pipeline_layout.clone(),
+            0,
+            descriptor_set,
+        )
+        .unwrap();
+
+    let extent = present_image.extent();
+    let local_size_in_shader = 8;
+
+    // The safety requirements are verifiable since only one descriptor set is given
+    unsafe {
+        builder
+            .dispatch([
+                extent[0].div_ceil(local_size_in_shader),
+                extent[1].div_ceil(local_size_in_shader),
+                1,
+            ])
+            .unwrap();
+    }
+
+    builder
+        .copy_image(CopyImageInfo::images(output_image, present_image))
+        .unwrap();
+
+    builder.build().unwrap()
+}
+
+fn create_descriptor_sets_and_output_images(
+    present_images: &[Arc<Image>],
+    pipeline: &Arc<ComputePipeline>,
+    queue: &Arc<Queue>,
+    device: &Arc<Device>,
+) -> (Vec<Arc<Image>>, Vec<Arc<DescriptorSet>>) {
+    let pipeline_layout = pipeline.layout();
+    let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
+    let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+        device.clone(),
+        Default::default(),
+    ));
+    let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
+        device.clone(),
+        Default::default(),
+    ));
+
+    let allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+
+    let model = create_model_and_fill(
+        device.clone(),
+        allocator.clone(),
+        command_buffer_allocator.clone(),
+        queue.clone(),
+    );
+
+    let model_image_view = ImageView::new_default(model).unwrap();
+
+    present_images
+        .iter()
+        .map(|present_image| {
+            let output_image = Image::new(
+                allocator.clone(),
+                ImageCreateInfo {
+                    format: present_image.format(),
+                    extent: present_image.extent(),
+                    usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+            let output_image_view = ImageView::new_default(output_image.clone()).unwrap();
+            let descriptor_set = DescriptorSet::new(
+                descriptor_set_allocator.clone(),
+                descriptor_set_layout.clone(),
+                [
+                    WriteDescriptorSet::image_view(0, output_image_view.clone()),
+                    WriteDescriptorSet::image_view(1, model_image_view.clone()),
+                ],
+                [],
+            )
+            .unwrap();
+
+            (output_image, descriptor_set)
+        })
+        .unzip()
 }
 
 fn get_compute_command_buffers(
@@ -267,6 +408,10 @@ fn get_compute_command_buffers(
             )
             .unwrap();
 
+            let workgroup_size = 8;
+            let extent = present_image.extent();
+
+            let start = Instant::now();
             let mut builder = AutoCommandBufferBuilder::primary(
                 command_buffer_allocator.clone(),
                 queue.queue_family_index(),
@@ -274,11 +419,14 @@ fn get_compute_command_buffers(
             )
             .unwrap();
 
-            let workgroup_size = 8;
-            let extent = present_image.extent();
+            let pc = PushConstants {
+                camera_position: [0, 10, 30],
+            };
 
             builder
                 .bind_pipeline_compute(pipeline.clone())
+                .unwrap()
+                .push_constants(pipeline_layout.clone(), 0, pc)
                 .unwrap()
                 .bind_descriptor_sets(
                     PipelineBindPoint::Compute,
@@ -306,7 +454,9 @@ fn get_compute_command_buffers(
                 ))
                 .unwrap();
 
-            builder.build().unwrap()
+            let built = builder.build().unwrap();
+            println!("Building the command buffer took: {:?}", start.elapsed());
+            built
         })
         .collect::<Vec<_>>()
 }
@@ -324,7 +474,7 @@ fn create_model_and_fill(
         ImageCreateInfo {
             image_type: ImageType::Dim3d,
             format: Format::R8G8B8A8_UNORM,
-            extent: extent,
+            extent,
             usage: ImageUsage::SAMPLED | ImageUsage::STORAGE | ImageUsage::TRANSFER_DST,
             ..Default::default()
         },

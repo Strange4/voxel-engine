@@ -8,6 +8,9 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba8) uniform image2D out_image;
 layout(set = 0, binding = 1, rgba8) uniform image3D model;
+layout(push_constant) uniform PushConstants {
+    ivec3 camera_transform;
+} push_constants;
 
 const float viewportHeight = 2;
 const float focalLength = 1;
@@ -19,16 +22,16 @@ vec4 getVoxelAtCoord(vec3 coord, AABB aabb) {
 
 vec2 intersection(Ray ray, AABB aabb) {
     vec3 inverse = 1 / ray.direction;
-    vec3 tMin = (aabb.minPos - ray.origin) * inverse;
-    vec3 tMax = (aabb.minPos + aabb.size - ray.origin) * inverse;
-    vec3 t1 = min(tMin, tMax);
-    vec3 t2 = max(tMin, tMax);
-    float tNear = max(max(t1.x, t1.y), t1.z);
-    float tFar = min(min(t2.x, t2.y), t2.z);
-    return vec2(tNear, tFar);
+    vec3 t_min = (aabb.minPos - ray.origin) * inverse;
+    vec3 t_max = (aabb.minPos + aabb.size - ray.origin) * inverse;
+    vec3 t1 = min(t_min, t_max);
+    vec3 t2 = max(t_min, t_max);
+    float t_near = max(max(t1.x, t1.y), t1.z);
+    float t_far = min(min(t2.x, t2.y), t2.z);
+    return vec2(t_near, t_far);
 }
 
-vec4 traverseAndGetColor(Ray ray, vec2 tMinMax, AABB aabb) {
+vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
     // 0 if the sign is -1.0 and 1 if the sign is 1.0
     vec3 planeSelector = sign(ray.direction) / vec3(2) + vec3(1) / vec3(2);
     float tMin = tMinMax.x;
@@ -48,7 +51,7 @@ vec4 traverseAndGetColor(Ray ray, vec2 tMinMax, AABB aabb) {
     while (all(greaterThanEqual(currentPoint, aabb.minPos)) && all(lessThanEqual(currentPoint, maxPoint))) {
         vec4 voxelValue = getVoxelAtCoord(currentPoint, aabb);
         if (voxelValue != vec4(0)) {
-            return vec4(0.1,0.85, 0.1, 1);
+            return vec4(0.1, 0.85, 0.1, 1);
         }
         steps++;
         if (t.x < t.y) {
@@ -75,7 +78,7 @@ vec4 traverseAndGetColor(Ray ray, vec2 tMinMax, AABB aabb) {
 }
 
 vec4 rayColor(Ray ray) {
-    vec3 modelPosition = vec3(10, 10, -30);
+    vec3 modelPosition = vec3(0, 0, 0);
     ivec3 modelSize = imageSize(model);
     vec3 unit = normalize(ray.direction);
     float t = 0.5 * (unit.x + 1);
@@ -89,7 +92,7 @@ vec4 rayColor(Ray ray) {
     if (tMin >= tMax) {
         return (1.0 - t) * startColor + t * endColor;
     }
-    return traverseAndGetColor(ray, tMinMax, aabb);
+    return traverse_and_get_color(ray, tMinMax, aabb);
 }
 
 void main() {
@@ -99,7 +102,7 @@ void main() {
 
     float aspectRatio = float(imgSize.x) / float(imgSize.y);
     float viewportWidth = aspectRatio * viewportHeight;
-    vec3 cameraCenter = vec3(0, 0, 0);
+    vec3 cameraCenter = push_constants.camera_transform;
     vec2 viewportVector = vec2(viewportWidth, -viewportHeight);
     vec2 pixelDelta = viewportVector / vec2(imgSize);
     vec3 viewportUpperLeft = cameraCenter - vec3(0, 0, focalLength) - vec3(viewportVector, 0) * 0.5;
