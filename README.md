@@ -1,7 +1,7 @@
 # TODO
 
 ### Make a moving camera
-Push constants the origin and direction of the camera.
+Update the push constants for the engine every time that we use the arrow keys.
 
 
 ## Questions and answers.

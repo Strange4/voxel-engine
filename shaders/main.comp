@@ -9,10 +9,10 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, rgba8) uniform image2D out_image;
 layout(set = 0, binding = 1, rgba8) uniform image3D model;
 layout(push_constant) uniform PushConstants {
-    ivec3 camera_transform;
+    vec3 camera_position;
 } push_constants;
 
-const float viewportHeight = 2;
+const float viewportHeight = 50;
 const float focalLength = 1;
 
 vec4 getVoxelAtCoord(vec3 coord, AABB aabb) {
@@ -96,20 +96,31 @@ vec4 rayColor(Ray ray) {
 }
 
 void main() {
-    ivec2 imgSize = imageSize(out_image);
+    vec2 imgSize = vec2(imageSize(out_image));
 
     if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
 
+    vec3 up_vector = vec3(0, -1, 0);
+
     float aspectRatio = float(imgSize.x) / float(imgSize.y);
     float viewportWidth = aspectRatio * viewportHeight;
-    vec3 cameraCenter = push_constants.camera_transform;
-    vec2 viewportVector = vec2(viewportWidth, -viewportHeight);
-    vec2 pixelDelta = viewportVector / vec2(imgSize);
-    vec3 viewportUpperLeft = cameraCenter - vec3(0, 0, focalLength) - vec3(viewportVector, 0) * 0.5;
-    vec3 topLeftPixel = viewportUpperLeft + 0.5 * vec3(pixelDelta, 0);
+    vec3 camera_center = push_constants.camera_position;
+    vec3 camera_relative_foward = normalize(-camera_center);
+    vec3 camera_relative_right = normalize(cross(camera_relative_foward, up_vector));
+    vec3 camera_relative_down = cross(camera_relative_foward, camera_relative_right);
+    vec3 viewport_right_vector = viewportWidth * camera_relative_right;
+    vec3 viewport_down_vector = viewportHeight * camera_relative_down;
 
-    vec3 pixelCenter = topLeftPixel + gl_GlobalInvocationID.x * vec3(pixelDelta.x, 0, 0) + gl_GlobalInvocationID.y * vec3(0, pixelDelta.y, 0);
-    vec3 rayDirection = pixelCenter - cameraCenter;
-    Ray ray = Ray(cameraCenter, rayDirection);
+    vec3 pixel_delta_right = viewport_right_vector / imgSize.x;
+    vec3 pixel_delta_down = viewport_down_vector / imgSize.y;
+
+    vec3 viewportUpperLeft = -viewport_down_vector * 0.5 - viewport_right_vector * 0.5;
+    vec3 topLeftPixel = viewportUpperLeft + 0.5 * (pixel_delta_down + pixel_delta_right);
+
+    vec3 pixelCenter = topLeftPixel + gl_GlobalInvocationID.x * pixel_delta_right + gl_GlobalInvocationID.y * pixel_delta_down;
+    vec3 rayDirection = normalize(pixelCenter - camera_center);
+    Ray ray = Ray(camera_center, rayDirection);
+    vec4 color = rayColor(ray);
     imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), rayColor(ray));
+    // imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(rayDirection.xyz, 0));
 }

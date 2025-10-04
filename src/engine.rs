@@ -1,3 +1,4 @@
+use std::f32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -41,9 +42,11 @@ pub struct Engine {
     recreate_swapchain: bool,
 
     // This is here so that we can modify it every frame by the app.
-    push_constants: PushConstants,
+    // using a spherical coordinate system: https://en.m.wikipedia.org/wiki/Spherical_coordinate_system
+    camera_x_radians: f32, // the angle off of the x vector
+    camera_y_radians: f32, // the angle off of the z vector
+    camera_radius: f32,
 
-    // command_buffers: Vec<Arc<PrimaryAutoCommandBuffer>>,
     descriptor_sets: Vec<Arc<DescriptorSet>>,
     present_images: Vec<Arc<Image>>,
     output_images: Vec<Arc<Image>>,
@@ -71,7 +74,7 @@ pub struct Engine {
 #[repr(C)]
 #[derive(BufferContents, Clone, Copy)]
 struct PushConstants {
-    camera_position: [i32; 3],
+    camera_position: [f32; 3],
 }
 
 impl Engine {
@@ -99,21 +102,11 @@ impl Engine {
         Self {
             recreate_swapchain: false,
             previous_fence: 0,
-
-            // command_buffers: get_compute_command_buffers(
-            //     device.clone(),
-            //     &queue,
-            //     &compute_pipeline,
-            //     &images,
-            // ),
             device: device.clone(),
             compute_pipeline,
             swapchain,
             queue,
             fences: vec![None; images.len()],
-            push_constants: PushConstants {
-                camera_position: [0, 10, 30],
-            },
             descriptor_sets,
             output_images,
             command_buffer_allocator: Arc::new(StandardCommandBufferAllocator::new(
@@ -121,6 +114,9 @@ impl Engine {
                 Default::default(),
             )),
             present_images: images,
+            camera_x_radians: -f32::consts::FRAC_PI_2,
+            camera_y_radians: f32::consts::FRAC_PI_2,
+            camera_radius: 40.0,
         }
     }
 
@@ -178,8 +174,15 @@ impl Engine {
             Some(fence) => fence.boxed(),
         };
 
+        let sin = self.camera_y_radians.sin();
+
+        let x = self.camera_radius * self.camera_x_radians.cos() * sin;
+        let y = self.camera_radius * self.camera_y_radians.cos();
+        let z = self.camera_radius * self.camera_x_radians.sin() * sin;
+
         let command_buffer = get_command_buffer(
-            self.push_constants,
+            
+            PushConstants { camera_position: [x,y,z] },
             self.descriptor_sets[swap_image_index as usize].clone(),
             self.command_buffer_allocator.clone(),
             self.present_images[swap_image_index as usize].clone(),
@@ -210,6 +213,10 @@ impl Engine {
             Err(err) => panic!("{err}"),
         };
         self.previous_fence = swap_image_index as usize;
+    }
+
+    pub fn move_right(&mut self, amount: f32) {
+        self.camera_y_radians += amount;
     }
 }
 
@@ -348,117 +355,6 @@ fn create_descriptor_sets_and_output_images(
             (output_image, descriptor_set)
         })
         .unzip()
-}
-
-fn get_compute_command_buffers(
-    device: Arc<Device>,
-    queue: &Arc<Queue>,
-    pipeline: &Arc<ComputePipeline>,
-    images: &[Arc<Image>],
-) -> Vec<Arc<PrimaryAutoCommandBuffer>> {
-    let pipeline_layout = pipeline.layout();
-    let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
-    let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
-    let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
-
-    let allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
-
-    let model = create_model_and_fill(
-        device.clone(),
-        allocator.clone(),
-        command_buffer_allocator.clone(),
-        queue.clone(),
-    );
-
-    let model_image_view = ImageView::new_default(model).unwrap();
-
-    // https://www.reddit.com/r/vulkan/comments/pf2no9/why_should_descriptor_sets_be_per_swap_chain_image/ you are supposed to have one descriptor set per image in swap cahin
-    images
-        .iter()
-        .map(|present_image| {
-            let output_image = Image::new(
-                allocator.clone(),
-                ImageCreateInfo {
-                    format: present_image.format(),
-                    extent: present_image.extent(),
-                    usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
-                    ..Default::default()
-                },
-                AllocationCreateInfo {
-                    memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            let output_image_view = ImageView::new_default(output_image.clone()).unwrap();
-            let descriptor_set = DescriptorSet::new(
-                descriptor_set_allocator.clone(),
-                descriptor_set_layout.clone(),
-                [
-                    WriteDescriptorSet::image_view(0, output_image_view.clone()),
-                    WriteDescriptorSet::image_view(1, model_image_view.clone()),
-                ],
-                [],
-            )
-            .unwrap();
-
-            let workgroup_size = 8;
-            let extent = present_image.extent();
-
-            let start = Instant::now();
-            let mut builder = AutoCommandBufferBuilder::primary(
-                command_buffer_allocator.clone(),
-                queue.queue_family_index(),
-                CommandBufferUsage::MultipleSubmit,
-            )
-            .unwrap();
-
-            let pc = PushConstants {
-                camera_position: [0, 10, 30],
-            };
-
-            builder
-                .bind_pipeline_compute(pipeline.clone())
-                .unwrap()
-                .push_constants(pipeline_layout.clone(), 0, pc)
-                .unwrap()
-                .bind_descriptor_sets(
-                    PipelineBindPoint::Compute,
-                    pipeline_layout.clone(),
-                    0,
-                    descriptor_set,
-                )
-                .unwrap();
-
-            // really no idea why this is unsafe now
-            unsafe {
-                builder
-                    .dispatch([
-                        extent[0].div_ceil(workgroup_size),
-                        extent[1].div_ceil(workgroup_size),
-                        1,
-                    ])
-                    .unwrap()
-            };
-
-            builder
-                .blit_image(BlitImageInfo::images(
-                    output_image.clone(),
-                    present_image.clone(),
-                ))
-                .unwrap();
-
-            let built = builder.build().unwrap();
-            println!("Building the command buffer took: {:?}", start.elapsed());
-            built
-        })
-        .collect::<Vec<_>>()
 }
 
 fn create_model_and_fill(
