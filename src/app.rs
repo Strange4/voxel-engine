@@ -1,10 +1,8 @@
 use crate::engine::Engine;
+use core::f32;
 use std::sync::Arc;
 use winit::{
-    application::ApplicationHandler,
-    event::WindowEvent,
-    event_loop::ActiveEventLoop,
-    window::{Window, WindowAttributes},
+    application::ApplicationHandler, event::{ElementState, KeyEvent, WindowEvent}, event_loop::ActiveEventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowAttributes}
 };
 
 #[derive(Default)]
@@ -33,6 +31,7 @@ impl ApplicationHandler for App {
         _: winit::window::WindowId,
         event: WindowEvent,
     ) {
+        let horizontal_move_amount = f32::consts::FRAC_PI_8;
         let engine = self.engine.as_mut().unwrap();
         let window = self.window.as_ref().unwrap();
         match event {
@@ -43,6 +42,15 @@ impl ApplicationHandler for App {
                 engine.draw(window, self.window_resize);
                 self.window_resize = false;
                 window.request_redraw();
+            },
+            WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(key_code), state: ElementState::Pressed, ..  } , .. } => {
+                match key_code {
+                    KeyCode::ArrowRight => engine.move_horizontally(horizontal_move_amount),
+                    KeyCode::ArrowLeft => engine.move_horizontally(-horizontal_move_amount),
+                    KeyCode::ArrowDown => engine.move_vertically(-horizontal_move_amount),
+                    KeyCode::ArrowUp => engine.move_vertically(horizontal_move_amount),
+                    _ => {}
+                }
             }
             _ => {}
         };

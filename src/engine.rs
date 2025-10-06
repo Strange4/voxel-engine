@@ -1,11 +1,11 @@
 use std::f32;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
+    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
     CopyBufferToImageInfo, CopyImageInfo, PrimaryAutoCommandBuffer,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
@@ -215,9 +215,14 @@ impl Engine {
         self.previous_fence = swap_image_index as usize;
     }
 
-    pub fn move_right(&mut self, amount: f32) {
-        self.camera_y_radians += amount;
+    pub fn move_horizontally(&mut self, amount_radians: f32) {
+        self.camera_x_radians += amount_radians;
     }
+
+    pub fn move_vertically(&mut self, amount_radians: f32) {
+        self.camera_y_radians += amount_radians;
+    }
+
 }
 
 fn get_compute_pipeline(
