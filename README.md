@@ -1,7 +1,6 @@
 # TODO
 
-### Make a moving camera
-Update the push constants for the engine every time that we use the arrow keys.
+### Add a GUI to have debugging and performance information in real time
 
 
 ## Questions and answers.
@@ -24,3 +23,6 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 # DONE
 [x] Create a 3D texture for tracing voxels
 
+![cool camera movement](./assets/cool_sphere_and_movement.mp4)
+
+[x] Make a moving camera

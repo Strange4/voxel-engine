@@ -49,10 +49,10 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
     vec3 maxPoint = aabb.minPos + aabb.size;
 
     // while the current position falls within the bounding box
-    while (all(greaterThanEqual(currentPoint, aabb.minPos))&&all(lessThanEqual(currentPoint, maxPoint))) {
+    while (all(greaterThanEqual(currentPoint, aabb.minPos)) && all(lessThanEqual(currentPoint, maxPoint))) {
         vec4 voxelValue = getVoxelAtCoord(currentPoint, aabb);
         if (any(notEqual(voxelValue, vec4(0)))) {
-            return vec4(0.1, 0.85, 0.1, 1);
+            return voxelValue;
         }
         steps++;
         if (t.x < t.y) {
@@ -73,6 +73,7 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
             }
         }
     }
+
     float maxSteps = float(aabb.size.x + aabb.size.y + aabb.size.z);
     float stepRatio = float(steps) / maxSteps;
     return vec4(vec3(stepRatio).xyz, 1);
@@ -90,7 +91,7 @@ vec4 rayColor(Ray ray) {
     float tMin = tMinMax.x;
     float tMax = tMinMax.y;
     if (tMin >= tMax) {
-        return vec4(0);
+        return vec4(0.156862745, 0.156862745, 0.156862745, 1);
         return (1.0 - t) * startColor + t * endColor;
     }
     return traverse_and_get_color(ray, tMinMax, aabb);

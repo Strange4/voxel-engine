@@ -5,8 +5,8 @@ use std::time::Duration;
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
-    CopyBufferToImageInfo, CopyImageInfo, PrimaryAutoCommandBuffer,
+    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage, CopyBufferToImageInfo,
+    CopyImageInfo, PrimaryAutoCommandBuffer,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
@@ -181,8 +181,9 @@ impl Engine {
         let z = self.camera_radius * self.camera_x_radians.sin() * sin;
 
         let command_buffer = get_command_buffer(
-            
-            PushConstants { camera_position: [x,y,z] },
+            PushConstants {
+                camera_position: [x, y, z],
+            },
             self.descriptor_sets[swap_image_index as usize].clone(),
             self.command_buffer_allocator.clone(),
             self.present_images[swap_image_index as usize].clone(),
@@ -223,6 +224,9 @@ impl Engine {
         self.camera_y_radians += amount_radians;
     }
 
+    pub fn move_towards(&mut self, amount: f32) {
+        self.camera_radius += amount;
+    }
 }
 
 fn get_compute_pipeline(
@@ -394,7 +398,7 @@ fn create_model_and_fill(
                 | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
-        get_model_data(20),
+        get_model_data(diameter),
     )
     .expect("Couldn't create buffer");
 
@@ -421,18 +425,30 @@ fn create_model_and_fill(
     image
 }
 fn get_model_data(diameter: u32) -> Vec<u8> {
-    let mut data = vec![0; (diameter * 4 * diameter * diameter) as usize];
+    let bytes_per_texel = 4;
+    let diameter = diameter as usize;
+    let mut data = vec![0; (diameter * bytes_per_texel * diameter * diameter) as usize];
+    // for y in 0..diameter/2 {
+    //     for x in 0..diameter  {
+    //         let begin = y * diameter * bytes_per_texel + x*bytes_per_texel;
+    //         data[begin..begin + bytes_per_texel].fill(255);
+    //     }
+    // }
     let radius = diameter / 2;
     for z in 0..diameter {
         for y in 0..diameter {
             for x in 0..diameter {
-                let x_dist = (diameter / 2).abs_diff(x);
-                let y_dist = (diameter / 2).abs_diff(y);
-                let z_dist = (diameter / 2).abs_diff(z);
+                let x_dist = radius.abs_diff(x);
+                let y_dist = radius.abs_diff(y);
+                let z_dist = radius.abs_diff(z);
                 if (x_dist * x_dist + y_dist * y_dist + z_dist * z_dist) <= (radius * radius) {
-                    let begin = (z * diameter * diameter * 4) + (y * diameter * 4) + x * 4;
-                    let end = (z * diameter * diameter * 4) + (y * diameter * 4) + (x + 1) * 4;
-                    data[(begin as usize)..(end as usize)].fill(255);
+                    let begin = z * diameter * diameter * bytes_per_texel
+                        + y * diameter * bytes_per_texel
+                        + x * bytes_per_texel;
+                    data[begin] = 0xb8; // red;
+                    data[begin + 1] = 0xbb; // green
+                    data[begin + 2] = 0x26; // blue
+                    data[begin + 3] = 0xFF; // alpha
                 }
             }
         }
