@@ -3,6 +3,15 @@
 ### Add a GUI to have debugging and performance information in real time
 
 
+## Benchark log
+
+#### Rendering a 10x10 cube in the middle of the screen
+- Compute shader time: 2.88009925456032 ms
+- Copy to present image time: 0.96153502934372 ms
+
+This is very surprising. Since this is the base case and I haven't done any cool traversal yet, I would imagine that this would take less than 1 ms. However, even rendering a simple color image to the screen takes ~1 ms.
+
+
 ## Questions and answers.
 
 #### What is a stencil image?

@@ -5,15 +5,15 @@ use std::time::Duration;
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage, CopyBufferToImageInfo,
-    CopyImageInfo, PrimaryAutoCommandBuffer,
+    AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
+    CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::image::view::ImageView;
-use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
+use vulkano::image::{Image, ImageCreateInfo, ImageLayout, ImageType, ImageUsage};
 use vulkano::memory::allocator::{
     AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryTypeFilter,
     StandardMemoryAllocator,
@@ -23,6 +23,7 @@ use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
 use vulkano::pipeline::{
     ComputePipeline, Pipeline, PipelineBindPoint, PipelineLayout, PipelineShaderStageCreateInfo,
 };
+use vulkano::query::{QueryPool, QueryPoolCreateInfo, QueryResultFlags, QueryType};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{
     self, PresentFuture, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
@@ -32,11 +33,21 @@ use vulkano::sync::future::{FenceSignalFuture, JoinFuture};
 use vulkano::{Validated, VulkanError};
 use winit::window::Window;
 
-use vulkano::sync::{self, GpuFuture};
+use vulkano::sync::{self, GpuFuture, PipelineStage};
 
 use crate::vulkan::starter::{
     get_device_and_queue, get_instance, get_physical_device_and_family_index, get_swapchain,
 };
+
+type CommandBufferFence = Arc<
+    FenceSignalFuture<
+        PresentFuture<
+            CommandBufferExecFuture<JoinFuture<Box<dyn GpuFuture>, SwapchainAcquireFuture>>,
+        >,
+    >,
+>;
+
+const TIMESTAMP_QUERIES_PER_IMAGE: u32 = 3;
 
 pub struct Engine {
     recreate_swapchain: bool,
@@ -47,28 +58,21 @@ pub struct Engine {
     camera_y_radians: f32, // the angle off of the z vector
     camera_radius: f32,
 
-    descriptor_sets: Vec<Arc<DescriptorSet>>,
-    present_images: Vec<Arc<Image>>,
-    output_images: Vec<Arc<Image>>,
-    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     device: Arc<Device>,
-    compute_pipeline: Arc<ComputePipeline>,
     swapchain: Arc<Swapchain>,
     queue: Arc<Queue>,
     previous_fence: usize,
-    fences: Vec<
-        Option<
-            Arc<
-                FenceSignalFuture<
-                    PresentFuture<
-                        CommandBufferExecFuture<
-                            JoinFuture<Box<dyn GpuFuture>, SwapchainAcquireFuture>,
-                        >,
-                    >,
-                >,
-            >,
-        >,
-    >,
+    fences: Vec<Option<CommandBufferFence>>,
+
+    present_images: Vec<Arc<Image>>,
+    output_images: Vec<Arc<Image>>,
+
+    descriptor_sets: Vec<Arc<DescriptorSet>>,
+    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
+    compute_pipeline: Arc<ComputePipeline>,
+
+    query_pool: Arc<QueryPool>,
+    timing_resolution: f64,
 }
 
 #[repr(C)]
@@ -99,6 +103,16 @@ impl Engine {
         let (output_images, descriptor_sets) =
             create_descriptor_sets_and_output_images(&images, &compute_pipeline, &queue, &device);
 
+
+        let query_pool = QueryPool::new(
+            device.clone(),
+            QueryPoolCreateInfo {
+                query_count: images.len() as u32 * TIMESTAMP_QUERIES_PER_IMAGE,
+                ..QueryPoolCreateInfo::query_type(QueryType::Timestamp)
+            },
+        )
+        .unwrap();
+
         Self {
             recreate_swapchain: false,
             previous_fence: 0,
@@ -117,6 +131,8 @@ impl Engine {
             camera_x_radians: -f32::consts::FRAC_PI_2,
             camera_y_radians: f32::consts::FRAC_PI_2,
             camera_radius: 40.0,
+            query_pool,
+            timing_resolution: physical_device.properties().timestamp_period as f64,
         }
     }
 
@@ -161,6 +177,8 @@ impl Engine {
             self.recreate_swapchain = true;
         }
 
+        // we have to wait because that image's descriptor set is sill in use.
+        // we can't create a new command buffer while it's still in use
         if let Some(image_fence) = &self.fences[swap_image_index as usize] {
             image_fence.wait(None).unwrap();
         }
@@ -190,6 +208,8 @@ impl Engine {
             self.output_images[swap_image_index as usize].clone(),
             &self.queue,
             self.compute_pipeline.clone(),
+            self.query_pool.clone(),
+            swap_image_index,
         );
 
         let execution = previous_future
@@ -214,6 +234,26 @@ impl Engine {
             Err(err) => panic!("{err}"),
         };
         self.previous_fence = swap_image_index as usize;
+
+        let timestamp_index = swap_image_index * TIMESTAMP_QUERIES_PER_IMAGE;
+
+        let mut timing_results = [0_u64; TIMESTAMP_QUERIES_PER_IMAGE as usize];
+
+        // NOTE: this will wait forever if the query never executes
+        self.query_pool
+            .get_results(
+                timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
+                &mut timing_results,
+                QueryResultFlags::WAIT,
+            )
+            .unwrap();
+
+
+        let in_ms = self.timing_resolution / 1_000_000.0;
+        let compute_shader_time = (timing_results[1] - timing_results[0]) as f64 * in_ms;
+        let copy_time = (timing_results[2] - timing_results[1]) as f64 * in_ms;
+
+        println!("Compute shader time: {compute_shader_time}ms, copy time: {copy_time}ms");
     }
 
     pub fn move_horizontally(&mut self, amount_radians: f32) {
@@ -260,6 +300,8 @@ fn get_command_buffer(
     output_image: Arc<Image>,
     queue: &Arc<Queue>,
     pipeline: Arc<ComputePipeline>,
+    query_pool: Arc<QueryPool>,
+    swapchain_index: u32,
 ) -> Arc<PrimaryAutoCommandBuffer> {
     let mut builder = AutoCommandBufferBuilder::primary(
         allocator,
@@ -282,8 +324,31 @@ fn get_command_buffer(
         )
         .unwrap();
 
+    let timestamp_index = swapchain_index * TIMESTAMP_QUERIES_PER_IMAGE;
+
+    // safety: this the queries are not used in any other command buffer since there is no other command buffer
+    unsafe {
+        builder
+            .reset_query_pool(
+                query_pool.clone(),
+                timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
+            )
+            .unwrap();
+    }
+
+    // safety: reset query pool was done above
+    unsafe {
+        builder
+            .write_timestamp(
+                query_pool.clone(),
+                timestamp_index,
+                PipelineStage::ComputeShader,
+            )
+            .unwrap();
+    }
+
     let extent = present_image.extent();
-    let local_size_in_shader = 8;
+    let local_size_in_shader = 16;
 
     // The safety requirements are verifiable since only one descriptor set is given
     unsafe {
@@ -296,9 +361,31 @@ fn get_command_buffer(
             .unwrap();
     }
 
+    // safety: reset query pool was done above
+    unsafe {
+        builder
+            .write_timestamp(
+                query_pool.clone(),
+                timestamp_index + 1,
+                PipelineStage::AllTransfer,
+            )
+            .unwrap();
+    }
+
     builder
-        .copy_image(CopyImageInfo::images(output_image, present_image))
+        .blit_image(BlitImageInfo::images(output_image, present_image))
         .unwrap();
+
+    // safety: reset query pool was done above
+    unsafe {
+        builder
+            .write_timestamp(
+                query_pool.clone(),
+                timestamp_index + 2,
+                PipelineStage::BottomOfPipe,
+            )
+            .unwrap();
+    }
 
     builder.build().unwrap()
 }
@@ -337,8 +424,9 @@ fn create_descriptor_sets_and_output_images(
             let output_image = Image::new(
                 allocator.clone(),
                 ImageCreateInfo {
-                    format: present_image.format(),
+                    format: Format::R8G8B8A8_UNORM,
                     extent: present_image.extent(),
+                    image_type: ImageType::Dim2d,
                     usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
                     ..Default::default()
                 },
@@ -428,12 +516,6 @@ fn get_model_data(diameter: u32) -> Vec<u8> {
     let bytes_per_texel = 4;
     let diameter = diameter as usize;
     let mut data = vec![0; (diameter * bytes_per_texel * diameter * diameter) as usize];
-    // for y in 0..diameter/2 {
-    //     for x in 0..diameter  {
-    //         let begin = y * diameter * bytes_per_texel + x*bytes_per_texel;
-    //         data[begin..begin + bytes_per_texel].fill(255);
-    //     }
-    // }
     let radius = diameter / 2;
     for z in 0..diameter {
         for y in 0..diameter {

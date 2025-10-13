@@ -4,7 +4,6 @@ use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
 };
-use vulkano::format::Format;
 use vulkano::image::{Image, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions};
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
@@ -35,7 +34,6 @@ pub fn get_instance(window: &Arc<Window>) -> Arc<Instance> {
         RawDisplayHandle::Xlib(_) => extensions.khr_xlib_surface = true,
         _ => unimplemented!(),
     };
-
     let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
     Instance::new(
         library,
@@ -54,26 +52,23 @@ pub fn get_swapchain(
     surface: Arc<Surface>,
     dimensions: PhysicalSize<u32>,
 ) -> (Arc<Swapchain>, Vec<Arc<Image>>) {
-    let max_push_constant_size = physical_device.properties().max_push_constants_size;
-    println!("Max size of push constants: {max_push_constant_size}mb");
     let caps = physical_device
         .surface_capabilities(&surface, Default::default())
         .unwrap();
     let composite_alpha = caps.supported_composite_alpha.into_iter().next().unwrap();
-    let wanted_format = Format::R8G8B8A8_UNORM;
-    physical_device
+
+    let format = &physical_device
         .surface_formats(&surface, Default::default())
-        .unwrap()
-        .iter()
-        .position(|(format, _)| *format == wanted_format)
-        .expect("Couldn't find the format desired: {wanted_format}");
+        .unwrap()[0];
+
     Swapchain::new(
         device,
         surface,
         SwapchainCreateInfo {
             min_image_count: caps.min_image_count, // How many buffers to use in the swapchain
-            image_format: wanted_format,
+            image_format: format.0,
             image_extent: dimensions.into(),
+            image_color_space: format.1,
             image_usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST, // What the images are going to be used for
             composite_alpha,
             ..Default::default()
@@ -90,14 +85,19 @@ pub fn get_physical_device_and_family_index(
     instance
         .enumerate_physical_devices()
         .unwrap()
-        .filter(|d| d.supported_extensions().contains(&get_device_extentions()))
+        .filter(|d| {
+            d.supported_extensions().contains(&get_device_extentions())
+                && d.properties().timestamp_period > 0.0
+        })
         .filter_map(|d| {
             d.queue_family_properties()
                 .iter()
                 .enumerate()
                 .position(|(i, queue)| {
                     let flags = &queue.queue_flags;
-                    flags.contains(QueueFlags::GRAPHICS)
+                    let has_timestamp_property = queue.timestamp_valid_bits.is_some();
+                    has_timestamp_property
+                        && flags.contains(QueueFlags::GRAPHICS)
                         && flags.contains(QueueFlags::COMPUTE)
                         && d.surface_support(i as u32, surface).unwrap_or(false)
                 })
