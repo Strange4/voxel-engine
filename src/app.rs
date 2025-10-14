@@ -23,7 +23,7 @@ impl ApplicationHandler for App {
         let window_attributes = WindowAttributes::default().with_title("Voxel Engine");
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.window = Some(window.clone());
-        self.engine = Some(Engine::new(window))
+        self.engine = Some(Engine::new(window, event_loop))
     }
 
     fn window_event(
@@ -34,6 +34,9 @@ impl ApplicationHandler for App {
     ) {
         let engine = self.engine.as_mut().unwrap();
         let window = self.window.as_ref().unwrap();
+        if engine.pass_event_to_gui(&event) {
+            return
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(_) => self.window_resize = true,
@@ -58,6 +61,7 @@ impl ApplicationHandler for App {
                 KeyCode::ArrowUp => engine.move_vertically(RADIUS_MOVE_AMOUNT),
                 KeyCode::KeyW => engine.move_towards(-1.0),
                 KeyCode::KeyS => engine.move_towards(1.0),
+                KeyCode::Escape => event_loop.exit(),
                 _ => {}
             },
             _ => {}

@@ -2,18 +2,20 @@ use std::f32;
 use std::sync::Arc;
 use std::time::Duration;
 
+use egui::Align2;
+use egui_winit_vulkano::{Gui, GuiConfig};
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
-    CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
+    AutoCommandBufferBuilder, BlitImageInfo, CommandBufferUsage, CopyBufferToImageInfo,
+    PrimaryAutoCommandBuffer,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
-use vulkano::image::view::ImageView;
-use vulkano::image::{Image, ImageCreateInfo, ImageLayout, ImageType, ImageUsage};
+use vulkano::image::view::{ImageView, ImageViewCreateInfo};
+use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
 use vulkano::memory::allocator::{
     AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryTypeFilter,
     StandardMemoryAllocator,
@@ -25,12 +27,11 @@ use vulkano::pipeline::{
 };
 use vulkano::query::{QueryPool, QueryPoolCreateInfo, QueryResultFlags, QueryType};
 use vulkano::shader::ShaderModule;
-use vulkano::swapchain::{
-    self, PresentFuture, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
-    SwapchainPresentInfo,
-};
-use vulkano::sync::future::{FenceSignalFuture, JoinFuture};
+use vulkano::swapchain::{self, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
+use vulkano::sync::future::FenceSignalFuture;
 use vulkano::{Validated, VulkanError};
+use winit::event::WindowEvent;
+use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
 use vulkano::sync::{self, GpuFuture, PipelineStage};
@@ -39,15 +40,12 @@ use crate::vulkan::starter::{
     get_device_and_queue, get_instance, get_physical_device_and_family_index, get_swapchain,
 };
 
-type CommandBufferFence = Arc<
-    FenceSignalFuture<
-        PresentFuture<
-            CommandBufferExecFuture<JoinFuture<Box<dyn GpuFuture>, SwapchainAcquireFuture>>,
-        >,
-    >,
->;
+type CommandBufferFence = Arc<FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>>;
 
 const TIMESTAMP_QUERIES_PER_IMAGE: u32 = 3;
+
+// this records two uints per timestamp. One for results the other for availability
+type TimestampAndAvailability = [u64; (TIMESTAMP_QUERIES_PER_IMAGE * 2) as usize];
 
 pub struct Engine {
     recreate_swapchain: bool,
@@ -58,21 +56,26 @@ pub struct Engine {
     camera_y_radians: f32, // the angle off of the z vector
     camera_radius: f32,
 
+    // for doing swapchains
     device: Arc<Device>,
     swapchain: Arc<Swapchain>,
     queue: Arc<Queue>,
     previous_fence: usize,
     fences: Vec<Option<CommandBufferFence>>,
+    present_images: Vec<(Arc<Image>, Arc<ImageView>)>,
 
-    present_images: Vec<Arc<Image>>,
-    output_images: Vec<Arc<Image>>,
-
+    // stuff required for the compute shader
     descriptor_sets: Vec<Arc<DescriptorSet>>,
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     compute_pipeline: Arc<ComputePipeline>,
+    output_images: Vec<Arc<Image>>,
 
+    // for timings
     query_pool: Arc<QueryPool>,
-    timing_resolution: f64,
+    timing_period: f64,
+    timestamps_and_availability: TimestampAndAvailability,
+
+    gui: Gui,
 }
 
 #[repr(C)]
@@ -82,7 +85,7 @@ struct PushConstants {
 }
 
 impl Engine {
-    pub fn new(window: Arc<Window>) -> Self {
+    pub fn new(window: Arc<Window>, event_loop: &ActiveEventLoop) -> Self {
         let instance = get_instance(&window);
         let surface = Surface::from_window(instance.clone(), window.clone()).unwrap();
         let dimensions = window.inner_size();
@@ -103,7 +106,6 @@ impl Engine {
         let (output_images, descriptor_sets) =
             create_descriptor_sets_and_output_images(&images, &compute_pipeline, &queue, &device);
 
-
         let query_pool = QueryPool::new(
             device.clone(),
             QueryPoolCreateInfo {
@@ -113,6 +115,19 @@ impl Engine {
         )
         .unwrap();
 
+        let images_and_views = get_images_and_views(images);
+
+        let gui = Gui::new(
+            event_loop,
+            surface,
+            queue.clone(),
+            images_and_views[0].0.format(), // give the same format as the swapchain format
+            GuiConfig {
+                is_overlay: true,
+                ..Default::default()
+            },
+        );
+
         Self {
             recreate_swapchain: false,
             previous_fence: 0,
@@ -120,19 +135,22 @@ impl Engine {
             compute_pipeline,
             swapchain,
             queue,
-            fences: vec![None; images.len()],
+            fences: vec![None; images_and_views.len()],
             descriptor_sets,
             output_images,
             command_buffer_allocator: Arc::new(StandardCommandBufferAllocator::new(
                 device.clone(),
                 Default::default(),
             )),
-            present_images: images,
+            present_images: images_and_views,
             camera_x_radians: -f32::consts::FRAC_PI_2,
             camera_y_radians: f32::consts::FRAC_PI_2,
             camera_radius: 40.0,
             query_pool,
-            timing_resolution: physical_device.properties().timestamp_period as f64,
+            timing_period: physical_device.properties().timestamp_period as f64,
+            gui,
+            // start all the availabilities at 1 so that we can start new ones right away
+            timestamps_and_availability: [1; (TIMESTAMP_QUERIES_PER_IMAGE * 2) as usize],
         }
     }
 
@@ -155,12 +173,11 @@ impl Engine {
                     &self.queue,
                     &self.device,
                 );
-                self.present_images = new_images;
+                self.present_images = get_images_and_views(new_images);
                 self.output_images = output_images;
                 self.descriptor_sets = descriptor_sets;
             }
         }
-
         let err =
             swapchain::acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap);
 
@@ -176,6 +193,21 @@ impl Engine {
         if suboptimal_image {
             self.recreate_swapchain = true;
         }
+
+        let should_not_record = self
+            .timestamps_and_availability
+            .iter()
+            .enumerate()
+            .any(|(index, &value)| index % 2 == 1 && value == 0);
+
+        // draw the gui before we have to wait for the fence. We will have to wait for the fence less
+        draw_gui(
+            &mut self.gui,
+            swap_image_index,
+            self.query_pool.clone(),
+            self.timing_period,
+            &mut self.timestamps_and_availability,
+        );
 
         // we have to wait because that image's descriptor set is sill in use.
         // we can't create a new command buffer while it's still in use
@@ -204,18 +236,26 @@ impl Engine {
             },
             self.descriptor_sets[swap_image_index as usize].clone(),
             self.command_buffer_allocator.clone(),
-            self.present_images[swap_image_index as usize].clone(),
+            self.present_images[swap_image_index as usize].0.clone(),
             self.output_images[swap_image_index as usize].clone(),
             &self.queue,
             self.compute_pipeline.clone(),
             self.query_pool.clone(),
             swap_image_index,
+            !should_not_record,
         );
 
         let execution = previous_future
             .join(acquire_future)
             .then_execute(self.queue.clone(), command_buffer)
-            .unwrap()
+            .unwrap();
+
+        let execution = self
+            .gui
+            .draw_on_image(
+                execution,
+                self.present_images[swap_image_index as usize].1.clone(),
+            )
             .then_swapchain_present(
                 self.queue.clone(),
                 SwapchainPresentInfo::swapchain_image_index(
@@ -225,7 +265,7 @@ impl Engine {
             )
             .then_signal_fence_and_flush();
 
-        self.fences[swap_image_index as usize] = match execution.map_err(Validated::unwrap) {
+        let future = match execution.map_err(Validated::unwrap) {
             Ok(future) => Some(Arc::new(future)),
             Err(VulkanError::OutOfDate) => {
                 self.recreate_swapchain = true;
@@ -233,27 +273,16 @@ impl Engine {
             }
             Err(err) => panic!("{err}"),
         };
+        self.fences[swap_image_index as usize] = future;
+
         self.previous_fence = swap_image_index as usize;
+    }
 
-        let timestamp_index = swap_image_index * TIMESTAMP_QUERIES_PER_IMAGE;
-
-        let mut timing_results = [0_u64; TIMESTAMP_QUERIES_PER_IMAGE as usize];
-
-        // NOTE: this will wait forever if the query never executes
-        self.query_pool
-            .get_results(
-                timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
-                &mut timing_results,
-                QueryResultFlags::WAIT,
-            )
-            .unwrap();
-
-
-        let in_ms = self.timing_resolution / 1_000_000.0;
-        let compute_shader_time = (timing_results[1] - timing_results[0]) as f64 * in_ms;
-        let copy_time = (timing_results[2] - timing_results[1]) as f64 * in_ms;
-
-        println!("Compute shader time: {compute_shader_time}ms, copy time: {copy_time}ms");
+    /// Returns true when the event should NOT be passed to the rest of the renderer. False when it should
+    ///
+    /// e.g. when you click on a egui window you don't want it to go to the renderer
+    pub fn pass_event_to_gui(&mut self, event: &WindowEvent) -> bool {
+        self.gui.update(event)
     }
 
     pub fn move_horizontally(&mut self, amount_radians: f32) {
@@ -267,6 +296,82 @@ impl Engine {
     pub fn move_towards(&mut self, amount: f32) {
         self.camera_radius += amount;
     }
+}
+
+fn draw_gui(
+    gui: &mut Gui,
+    swap_image_index: u32,
+    query_pool: Arc<QueryPool>,
+    timing_period: f64,
+    timing_results: &mut TimestampAndAvailability,
+) {
+    // keep these just in case the results aren't available
+    let previous_compute_timestamp = timing_results[2] - timing_results[0];
+    let previous_copy_timestamp = timing_results[4] - timing_results[2];
+    let in_ms = timing_period / 1_000_000.0;
+
+    let mut compute_time = previous_compute_timestamp as f64 * in_ms;
+    let mut copy_time = previous_copy_timestamp as f64 * in_ms;
+
+    update_timings(swap_image_index, query_pool, timing_results);
+
+    let all_ready = !timing_results
+        .iter()
+        .enumerate()
+        .any(|(index, &value)| index % 2 == 1 && value == 0);
+    if all_ready {
+        compute_time = (timing_results[2] - timing_results[0]) as f64 * in_ms;
+        copy_time = (timing_results[4] - timing_results[2]) as f64 * in_ms;
+    }
+
+    gui.immediate_ui(|gui| {
+        let ctx = gui.context();
+
+        egui::Window::new("Specs")
+            // .anchor(Align2::LEFT_TOP, [5.0, 5.0])
+            .auto_sized()
+            .show(&ctx, |ui| {
+                ui.label(format!("Compute time: {compute_time:.3}ms"));
+                ui.label(format!("Copy time: {copy_time:.3}ms"));
+            });
+    });
+}
+
+fn get_images_and_views(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageView>)> {
+    images
+        .into_iter()
+        .map(|image| {
+            (
+                image.clone(),
+                ImageView::new(
+                    image.clone(),
+                    ImageViewCreateInfo {
+                        format: image.format(),
+                        subresource_range: image.subresource_range(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn update_timings(
+    swap_image_index: u32,
+    query_pool: Arc<QueryPool>,
+    timing_results: &mut TimestampAndAvailability,
+) {
+    let timestamp_index = swap_image_index * TIMESTAMP_QUERIES_PER_IMAGE;
+
+    // NOTE: this will wait forever if the query never executes
+    query_pool
+        .get_results(
+            timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
+            timing_results,
+            QueryResultFlags::WITH_AVAILABILITY,
+        )
+        .unwrap();
 }
 
 fn get_compute_pipeline(
@@ -302,6 +407,7 @@ fn get_command_buffer(
     pipeline: Arc<ComputePipeline>,
     query_pool: Arc<QueryPool>,
     swapchain_index: u32,
+    should_write_timestamp: bool,
 ) -> Arc<PrimaryAutoCommandBuffer> {
     let mut builder = AutoCommandBufferBuilder::primary(
         allocator,
@@ -336,15 +442,17 @@ fn get_command_buffer(
             .unwrap();
     }
 
-    // safety: reset query pool was done above
-    unsafe {
-        builder
-            .write_timestamp(
-                query_pool.clone(),
-                timestamp_index,
-                PipelineStage::ComputeShader,
-            )
-            .unwrap();
+    if should_write_timestamp {
+        // safety: reset query pool was done above
+        unsafe {
+            builder
+                .write_timestamp(
+                    query_pool.clone(),
+                    timestamp_index,
+                    PipelineStage::ComputeShader,
+                )
+                .unwrap();
+        }
     }
 
     let extent = present_image.extent();
@@ -361,30 +469,34 @@ fn get_command_buffer(
             .unwrap();
     }
 
-    // safety: reset query pool was done above
-    unsafe {
-        builder
-            .write_timestamp(
-                query_pool.clone(),
-                timestamp_index + 1,
-                PipelineStage::AllTransfer,
-            )
-            .unwrap();
+    if should_write_timestamp {
+        // safety: reset query pool was done above
+        unsafe {
+            builder
+                .write_timestamp(
+                    query_pool.clone(),
+                    timestamp_index + 1,
+                    PipelineStage::AllTransfer,
+                )
+                .unwrap();
+        }
     }
 
     builder
         .blit_image(BlitImageInfo::images(output_image, present_image))
         .unwrap();
 
-    // safety: reset query pool was done above
-    unsafe {
-        builder
-            .write_timestamp(
-                query_pool.clone(),
-                timestamp_index + 2,
-                PipelineStage::BottomOfPipe,
-            )
-            .unwrap();
+    if should_write_timestamp {
+        // safety: reset query pool was done above
+        unsafe {
+            builder
+                .write_timestamp(
+                    query_pool.clone(),
+                    timestamp_index + 2,
+                    PipelineStage::BottomOfPipe,
+                )
+                .unwrap();
+        }
     }
 
     builder.build().unwrap()
