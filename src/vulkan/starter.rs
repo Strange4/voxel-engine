@@ -57,7 +57,7 @@ pub fn get_swapchain(
         .unwrap();
     let composite_alpha = caps.supported_composite_alpha.into_iter().next().unwrap();
 
-    let format = &physical_device
+    let format = physical_device
         .surface_formats(&surface, Default::default())
         .unwrap()[0];
 

@@ -73,7 +73,9 @@ pub struct Engine {
     // for timings
     query_pool: Arc<QueryPool>,
     timing_period: f64,
-    timestamps_and_availability: TimestampAndAvailability,
+    compute_time: f64,
+    copy_time: f64,
+    should_record: Vec<bool>,
 
     gui: Gui,
 }
@@ -142,6 +144,7 @@ impl Engine {
                 device.clone(),
                 Default::default(),
             )),
+            should_record: vec![true; images_and_views.len()],
             present_images: images_and_views,
             camera_x_radians: -f32::consts::FRAC_PI_2,
             camera_y_radians: f32::consts::FRAC_PI_2,
@@ -149,8 +152,8 @@ impl Engine {
             query_pool,
             timing_period: physical_device.properties().timestamp_period as f64,
             gui,
-            // start all the availabilities at 1 so that we can start new ones right away
-            timestamps_and_availability: [1; (TIMESTAMP_QUERIES_PER_IMAGE * 2) as usize],
+            compute_time: 0.0,
+            copy_time: 0.0,
         }
     }
 
@@ -194,19 +197,11 @@ impl Engine {
             self.recreate_swapchain = true;
         }
 
-        let should_not_record = self
-            .timestamps_and_availability
-            .iter()
-            .enumerate()
-            .any(|(index, &value)| index % 2 == 1 && value == 0);
-
         // draw the gui before we have to wait for the fence. We will have to wait for the fence less
         draw_gui(
             &mut self.gui,
-            swap_image_index,
-            self.query_pool.clone(),
-            self.timing_period,
-            &mut self.timestamps_and_availability,
+            self.compute_time,
+            self.copy_time
         );
 
         // we have to wait because that image's descriptor set is sill in use.
@@ -242,8 +237,10 @@ impl Engine {
             self.compute_pipeline.clone(),
             self.query_pool.clone(),
             swap_image_index,
-            !should_not_record,
+            self.should_record[swap_image_index as usize],
         );
+
+        self.update_query_timings(swap_image_index);
 
         let execution = previous_future
             .join(acquire_future)
@@ -296,39 +293,45 @@ impl Engine {
     pub fn move_towards(&mut self, amount: f32) {
         self.camera_radius += amount;
     }
+
+    fn update_query_timings(&mut self, swap_image_index: u32) {
+        let timestamp_index = swap_image_index * TIMESTAMP_QUERIES_PER_IMAGE;
+        let mut timing_results: TimestampAndAvailability =
+        [0; (TIMESTAMP_QUERIES_PER_IMAGE * 2) as usize];
+        
+        self.query_pool
+            .get_results(
+                timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
+                &mut timing_results,
+                QueryResultFlags::WITH_AVAILABILITY,
+            )
+            .unwrap();
+        let all_available = !timing_results
+            .iter()
+            .enumerate()
+            .any(|(index, &value)| index % 2 == 1 && value == 0);
+        // update timings if all of them are available
+        if all_available {
+            let in_ms = self.timing_period / 1_000_000.0;
+            self.compute_time = (timing_results[2] - timing_results[0]) as f64 * in_ms;
+            self.copy_time = (timing_results[4] - timing_results[2]) as f64 * in_ms;
+        }
+
+        self.should_record[swap_image_index as usize] = all_available;
+    }
 }
 
 fn draw_gui(
     gui: &mut Gui,
-    swap_image_index: u32,
-    query_pool: Arc<QueryPool>,
-    timing_period: f64,
-    timing_results: &mut TimestampAndAvailability,
+    compute_time: f64,
+    copy_time: f64
 ) {
-    // keep these just in case the results aren't available
-    let previous_compute_timestamp = timing_results[2] - timing_results[0];
-    let previous_copy_timestamp = timing_results[4] - timing_results[2];
-    let in_ms = timing_period / 1_000_000.0;
-
-    let mut compute_time = previous_compute_timestamp as f64 * in_ms;
-    let mut copy_time = previous_copy_timestamp as f64 * in_ms;
-
-    update_timings(swap_image_index, query_pool, timing_results);
-
-    let all_ready = !timing_results
-        .iter()
-        .enumerate()
-        .any(|(index, &value)| index % 2 == 1 && value == 0);
-    if all_ready {
-        compute_time = (timing_results[2] - timing_results[0]) as f64 * in_ms;
-        copy_time = (timing_results[4] - timing_results[2]) as f64 * in_ms;
-    }
 
     gui.immediate_ui(|gui| {
         let ctx = gui.context();
 
         egui::Window::new("Specs")
-            // .anchor(Align2::LEFT_TOP, [5.0, 5.0])
+            .anchor(Align2::LEFT_TOP, [5.0, 5.0])
             .auto_sized()
             .show(&ctx, |ui| {
                 ui.label(format!("Compute time: {compute_time:.3}ms"));
@@ -355,23 +358,6 @@ fn get_images_and_views(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageVi
             )
         })
         .collect()
-}
-
-fn update_timings(
-    swap_image_index: u32,
-    query_pool: Arc<QueryPool>,
-    timing_results: &mut TimestampAndAvailability,
-) {
-    let timestamp_index = swap_image_index * TIMESTAMP_QUERIES_PER_IMAGE;
-
-    // NOTE: this will wait forever if the query never executes
-    query_pool
-        .get_results(
-            timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
-            timing_results,
-            QueryResultFlags::WITH_AVAILABILITY,
-        )
-        .unwrap();
 }
 
 fn get_compute_pipeline(
@@ -432,14 +418,16 @@ fn get_command_buffer(
 
     let timestamp_index = swapchain_index * TIMESTAMP_QUERIES_PER_IMAGE;
 
-    // safety: this the queries are not used in any other command buffer since there is no other command buffer
-    unsafe {
-        builder
-            .reset_query_pool(
-                query_pool.clone(),
-                timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
-            )
-            .unwrap();
+    if should_write_timestamp {
+        // safety: this the queries are not used in any other command buffer since there is no other command buffer
+        unsafe {
+            builder
+                .reset_query_pool(
+                    query_pool.clone(),
+                    timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
+                )
+                .unwrap();
+        }
     }
 
     if should_write_timestamp {
@@ -493,7 +481,7 @@ fn get_command_buffer(
                 .write_timestamp(
                     query_pool.clone(),
                     timestamp_index + 2,
-                    PipelineStage::BottomOfPipe,
+                    PipelineStage::VertexInput,
                 )
                 .unwrap();
         }

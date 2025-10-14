@@ -99,7 +99,6 @@ vec4 rayColor(Ray ray) {
 
 void main() {
     vec2 imgSize = vec2(imageSize(out_image));
-
     if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
 
     vec3 up_vector = vec3(0, -1, 0);
