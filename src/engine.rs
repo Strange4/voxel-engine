@@ -287,7 +287,7 @@ impl Engine {
     }
 
     pub fn move_vertically(&mut self, amount_radians: f32) {
-        self.camera_y_radians += amount_radians;
+        self.camera_y_radians = (self.camera_y_radians + amount_radians).clamp(0.001, f32::consts::PI - 0.001);
     }
 
     pub fn move_towards(&mut self, amount: f32) {
@@ -627,9 +627,10 @@ fn get_model_data(diameter: u32) -> Vec<u8> {
                     let begin = z * diameter * diameter * bytes_per_texel
                         + y * diameter * bytes_per_texel
                         + x * bytes_per_texel;
-                    data[begin] = 0xb8; // red;
-                    data[begin + 1] = 0xbb; // green
-                    data[begin + 2] = 0x26; // blue
+                    let color = ((x + y + z) % 2) * 0xb8bb26;
+                    data[begin] = ((color & 0xFF0000) >> 16) as u8; // red;
+                    data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // red;
+                    data[begin + 2] = (color & 0x0000FF) as u8; // red;
                     data[begin + 3] = 0xFF; // alpha
                 }
             }

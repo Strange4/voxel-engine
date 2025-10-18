@@ -40,7 +40,7 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
     // this will select the "next" plane that the ray will intersect with.
     // See https://www.youtube.com/watch?v=ztkh1r1ioZo for more info
     // 0 if the sign is -1.0 and 1 if the sign is 1.0
-    vec3 planeSelector = (sign(ray.direction) * 0.5) + 0.5;
+    vec3 planeSelector = sign(ray.direction) * 0.5 + 0.5;
     vec3 integerPlanes = currentPoint + planeSelector;
     vec3 t = (integerPlanes - ray.origin) / ray.direction;
     vec3 planeStep = sign(ray.direction);
@@ -51,27 +51,13 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
     // while the current position falls within the bounding box
     while (all(greaterThanEqual(currentPoint, aabb.minPos)) && all(lessThanEqual(currentPoint, maxPoint))) {
         vec4 voxelValue = getVoxelAtCoord(currentPoint, aabb);
-        if (any(notEqual(voxelValue, vec4(0)))) {
+        if (voxelValue.a > 0.0) {
             return voxelValue;
         }
         steps++;
-        if (t.x < t.y) {
-            if (t.x < t.z) {
-                currentPoint.x += planeStep.x;
-                t.x += tDelta.x;
-            } else {
-                currentPoint.z += planeStep.z;
-                t.z += tDelta.z;
-            }
-        } else {
-            if (t.y < t.z) {
-                currentPoint.y += planeStep.y;
-                t.y += tDelta.y;
-            } else {
-                currentPoint.z += planeStep.z;
-                t.z += tDelta.z;
-            }
-        }
+        int axis = (t.x < t.y) ? ((t.x < t.z) ? 0 : 2) : ((t.y < t.z) ? 1 : 2);
+        currentPoint[axis] += planeStep[axis];
+        t[axis] += tDelta[axis];
     }
 
     float maxSteps = float(aabb.size.x + aabb.size.y + aabb.size.z);
@@ -81,18 +67,13 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
 
 vec4 rayColor(Ray ray) {
     vec3 modelSize = vec3(imageSize(model));
-    vec3 modelPosition = vec3(modelSize * -0.5);
-    vec3 unit = normalize(ray.direction);
-    float t = 0.5 * (unit.x + 1);
-    vec4 startColor = vec4(0, 0, 0, 1);
-    vec4 endColor = vec4(0.5, 0.5, 0.5, 1);
+    vec3 modelPosition = modelSize * -0.5;
     AABB aabb = AABB(modelPosition, modelSize);
     vec2 tMinMax = intersection(ray, aabb);
     float tMin = tMinMax.x;
     float tMax = tMinMax.y;
     if (tMin >= tMax) {
-        return vec4(0.156862745, 0.156862745, 0.156862745, 1);
-        return (1.0 - t) * startColor + t * endColor;
+        return vec4(vec3(0.156862745).xyz, 1);
     }
     return traverse_and_get_color(ray, tMinMax, aabb);
 }
@@ -101,7 +82,7 @@ void main() {
     vec2 imgSize = vec2(imageSize(out_image));
     if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
 
-    vec3 up_vector = vec3(0, -1, 0);
+    const vec3 up_vector = vec3(0, -1, 0);
 
     float aspectRatio = float(imgSize.x) / float(imgSize.y);
     float viewportWidth = aspectRatio * viewportHeight;
@@ -115,7 +96,7 @@ void main() {
     vec3 pixel_delta_right = viewport_right_vector / imgSize.x;
     vec3 pixel_delta_down = viewport_down_vector / imgSize.y;
 
-    vec3 viewportUpperLeft = -viewport_down_vector * 0.5 - viewport_right_vector * 0.5;
+    vec3 viewportUpperLeft = -viewport_down_vector * 0.5 -viewport_right_vector * 0.5;
     vec3 topLeftPixel = viewportUpperLeft + 0.5 * (pixel_delta_down + pixel_delta_right);
 
     vec3 pixelCenter = topLeftPixel + gl_GlobalInvocationID.x * pixel_delta_right + gl_GlobalInvocationID.y * pixel_delta_down;

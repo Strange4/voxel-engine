@@ -5,6 +5,9 @@
 
 ## Benchark log
 
+- branchless checking for delta t: from 0.94ms to 0.93ms
+- Expanding casts between ve4 and vec3, no difference.
+
 #### Installing nvidia drivers
 - Compute shader time: 0.92ms
 - Copy to present image time: 0.26ms
