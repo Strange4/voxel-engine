@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use egui::Align2;
 use egui_winit_vulkano::{Gui, GuiConfig};
+use glam::{Vec3, Vec4, vec3};
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
@@ -56,6 +57,10 @@ pub struct Engine {
     camera_y_radians: f32, // the angle off of the z vector
     camera_radius: f32,
 
+    // stuff that we want to precompute
+    ray_dependencies: PushConstants,
+    last_image_size: [f32; 2],
+
     // for doing swapchains
     device: Arc<Device>,
     swapchain: Arc<Swapchain>,
@@ -80,10 +85,18 @@ pub struct Engine {
     gui: Gui,
 }
 
+// we have to use vec4's instead of vec3's because of how the padding in the std140 works.
+// They padd the vec3's to vec4's and when we "read" the vec3's in the shader side they will only read what they need
+// please see: https://learnopengl.com/Advanced-OpenGL/Advanced-GLSL Uniform block layout
+// and: https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.align-packed
+// cool visualizer: https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/
 #[repr(C)]
-#[derive(BufferContents, Clone, Copy)]
+#[derive(BufferContents, Clone, Copy, Default)]
 struct PushConstants {
-    camera_position: [f32; 3],
+    top_left_pixel: Vec4,
+    pixel_delta_right: Vec4,
+    pixel_delta_down: Vec4,
+    camera_center: Vec4, // the last one actually has to be the real type
 }
 
 impl Engine {
@@ -102,6 +115,9 @@ impl Engine {
             surface.clone(),
             dimensions,
         );
+
+        let extent = images[0].extent();
+        let last_image_size = [extent[0] as f32, extent[1] as f32];
 
         let compute_shader = cs::load(device.clone()).unwrap();
         let compute_pipeline = get_compute_pipeline(&device, &compute_shader);
@@ -130,7 +146,7 @@ impl Engine {
             },
         );
 
-        Self {
+        let mut s = Self {
             recreate_swapchain: false,
             previous_fence: 0,
             device: device.clone(),
@@ -154,7 +170,13 @@ impl Engine {
             gui,
             compute_time: 0.0,
             copy_time: 0.0,
-        }
+            ray_dependencies: PushConstants::default(),
+            last_image_size,
+        };
+
+        s.compute_ray_dependencies();
+
+        s
     }
 
     pub fn draw(&mut self, window: &Arc<Window>, window_resized: bool) {
@@ -179,6 +201,8 @@ impl Engine {
                 self.present_images = get_images_and_views(new_images);
                 self.output_images = output_images;
                 self.descriptor_sets = descriptor_sets;
+                self.last_image_size = [new_dimensions.width as f32, new_dimensions.height as f32];
+                self.compute_ray_dependencies();
             }
         }
         let err =
@@ -198,11 +222,7 @@ impl Engine {
         }
 
         // draw the gui before we have to wait for the fence. We will have to wait for the fence less
-        draw_gui(
-            &mut self.gui,
-            self.compute_time,
-            self.copy_time
-        );
+        draw_gui(&mut self.gui, self.compute_time, self.copy_time);
 
         // we have to wait because that image's descriptor set is sill in use.
         // we can't create a new command buffer while it's still in use
@@ -219,16 +239,8 @@ impl Engine {
             Some(fence) => fence.boxed(),
         };
 
-        let sin = self.camera_y_radians.sin();
-
-        let x = self.camera_radius * self.camera_x_radians.cos() * sin;
-        let y = self.camera_radius * self.camera_y_radians.cos();
-        let z = self.camera_radius * self.camera_x_radians.sin() * sin;
-
         let command_buffer = get_command_buffer(
-            PushConstants {
-                camera_position: [x, y, z],
-            },
+            self.ray_dependencies,
             self.descriptor_sets[swap_image_index as usize].clone(),
             self.command_buffer_allocator.clone(),
             self.present_images[swap_image_index as usize].0.clone(),
@@ -284,21 +296,25 @@ impl Engine {
 
     pub fn move_horizontally(&mut self, amount_radians: f32) {
         self.camera_x_radians += amount_radians;
+        self.compute_ray_dependencies();
     }
 
     pub fn move_vertically(&mut self, amount_radians: f32) {
-        self.camera_y_radians = (self.camera_y_radians + amount_radians).clamp(0.001, f32::consts::PI - 0.001);
+        self.camera_y_radians =
+            (self.camera_y_radians + amount_radians).clamp(0.001, f32::consts::PI - 0.001);
+        self.compute_ray_dependencies();
     }
 
-    pub fn move_towards(&mut self, amount: f32) {
+    pub fn move_forward(&mut self, amount: f32) {
         self.camera_radius += amount;
+        self.compute_ray_dependencies();
     }
 
     fn update_query_timings(&mut self, swap_image_index: u32) {
         let timestamp_index = swap_image_index * TIMESTAMP_QUERIES_PER_IMAGE;
         let mut timing_results: TimestampAndAvailability =
-        [0; (TIMESTAMP_QUERIES_PER_IMAGE * 2) as usize];
-        
+            [0; (TIMESTAMP_QUERIES_PER_IMAGE * 2) as usize];
+
         self.query_pool
             .get_results(
                 timestamp_index..timestamp_index + TIMESTAMP_QUERIES_PER_IMAGE,
@@ -319,14 +335,43 @@ impl Engine {
 
         self.should_record[swap_image_index as usize] = all_available;
     }
+
+    fn compute_ray_dependencies(&mut self) {
+        const VIEWPORT_HEIGHT: f32 = 30.0;
+        const UP_VECTOR: Vec3 = vec3(0.0, -1.0, 0.0);
+        let image_width = self.last_image_size[0];
+        let image_height = self.last_image_size[1];
+        let sin = self.camera_y_radians.sin();
+        let x = self.camera_radius * self.camera_x_radians.cos() * sin;
+        let y = self.camera_radius * self.camera_y_radians.cos();
+        let z = self.camera_radius * self.camera_x_radians.sin() * sin;
+        let camera_center = vec3(x, y, z);
+
+        let aspect_ratio = image_width / image_height;
+        let viewport_width = aspect_ratio * VIEWPORT_HEIGHT;
+        let camera_relative_forward = (-camera_center).normalize();
+        let camera_relative_right = camera_relative_forward.cross(UP_VECTOR).normalize();
+        let camera_relative_down = camera_relative_forward.cross(camera_relative_right);
+
+        let viewport_right_vector = viewport_width * camera_relative_right;
+        let viewport_down_vector = VIEWPORT_HEIGHT * camera_relative_down;
+
+        let pixel_delta_right = viewport_right_vector / image_width;
+        let pixel_delta_down = viewport_down_vector / image_height;
+
+        let viepwort_upper_left = -viewport_down_vector * 0.5 - viewport_right_vector * 0.5;
+        let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
+
+        self.ray_dependencies = PushConstants {
+            top_left_pixel: Vec4::from((top_left_pixel, 0.0)),
+            pixel_delta_right: Vec4::from((pixel_delta_right, 0.0)),
+            pixel_delta_down: Vec4::from((pixel_delta_down, 0.0)),
+            camera_center: Vec4::from((camera_center, 0.0)),
+        }
+    }
 }
 
-fn draw_gui(
-    gui: &mut Gui,
-    compute_time: f64,
-    copy_time: f64
-) {
-
+fn draw_gui(gui: &mut Gui, compute_time: f64, copy_time: f64) {
     gui.immediate_ui(|gui| {
         let ctx = gui.context();
 

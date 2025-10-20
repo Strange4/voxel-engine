@@ -796,6 +796,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e12d847aeb25f41be4c0ec9587d624e9cd631bc007a8fd7ce3f5851e064c6460"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "half"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2460,6 +2469,7 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui_winit_vulkano",
+ "glam",
  "vulkano",
  "vulkano-shaders",
  "winit",

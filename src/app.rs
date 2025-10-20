@@ -59,8 +59,8 @@ impl ApplicationHandler for App {
                 KeyCode::ArrowLeft => engine.move_horizontally(-RADIUS_MOVE_AMOUNT),
                 KeyCode::ArrowDown => engine.move_vertically(-RADIUS_MOVE_AMOUNT),
                 KeyCode::ArrowUp => engine.move_vertically(RADIUS_MOVE_AMOUNT),
-                KeyCode::KeyW => engine.move_towards(-1.0),
-                KeyCode::KeyS => engine.move_towards(1.0),
+                KeyCode::KeyW => engine.move_forward(-1.0),
+                KeyCode::KeyS => engine.move_forward(1.0),
                 KeyCode::Escape => event_loop.exit(),
                 _ => {}
             },

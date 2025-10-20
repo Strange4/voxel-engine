@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 egui = "0.31"
 egui_winit_vulkano = "0.28.0"
+glam = { version = "0.30.8", features = ["bytemuck"]}
 vulkano = "0.35"
 vulkano-shaders = { version = "0.35.0" }
 # vulkano-shaders = { version = "0.35.0", features = ["shaderc-debug"] } # add this when you want to step through shaders in renderdoc
