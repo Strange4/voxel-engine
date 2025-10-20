@@ -1,6 +1,11 @@
 # TODO
 
+### use sparse voxel octrees in traversal and storage
+
+### Generate different models to visualize
+
 ### START RAY TRACING!!!
+Should probably add turn on and off features in the ui so that I can see the performance and visual difference
 
 
 ## Benchark log
