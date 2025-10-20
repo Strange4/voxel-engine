@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use egui::Align2;
 use egui_winit_vulkano::{Gui, GuiConfig};
-use glam::{Vec3, Vec4, vec3};
+use glam::{Vec3, vec3};
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
@@ -93,10 +93,12 @@ pub struct Engine {
 #[repr(C)]
 #[derive(BufferContents, Clone, Copy, Default)]
 struct PushConstants {
-    top_left_pixel: Vec4,
-    pixel_delta_right: Vec4,
-    pixel_delta_down: Vec4,
-    camera_center: Vec4, // the last one actually has to be the real type
+    top_left_pixel: Vec3,
+    camera_x: f32,
+    pixel_delta_right: Vec3,
+    camera_y: f32,
+    pixel_delta_down: Vec3,
+    camera_z: f32,
 }
 
 impl Engine {
@@ -363,10 +365,12 @@ impl Engine {
         let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
 
         self.ray_dependencies = PushConstants {
-            top_left_pixel: Vec4::from((top_left_pixel, 0.0)),
-            pixel_delta_right: Vec4::from((pixel_delta_right, 0.0)),
-            pixel_delta_down: Vec4::from((pixel_delta_down, 0.0)),
-            camera_center: Vec4::from((camera_center, 0.0)),
+            top_left_pixel,
+            pixel_delta_right,
+            pixel_delta_down,
+            camera_x: camera_center.x,
+            camera_y: camera_center.y,
+            camera_z: camera_center.z,
         }
     }
 }

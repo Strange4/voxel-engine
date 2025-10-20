@@ -11,10 +11,12 @@ layout(set = 0, binding = 1, rgba8) uniform image3D model;
 
 // we use vec4's for alignment because vec3's get padded anyway
 layout(std140, push_constant) uniform PushConstants {
-    vec4 top_left_pixel;
-    vec4 pixel_delta_right;
-    vec4 pixel_delta_down;
-    vec4 camera_center;
+    vec3 top_left_pixel;
+    float camera_x;
+    vec3 pixel_delta_right;
+    float camera_y;
+    vec3 pixel_delta_down;
+    float camera_z;
 } push_constants;
 
 const float viewportHeight = 30;
@@ -88,7 +90,7 @@ void main() {
     vec3 top_left_pixel = push_constants.top_left_pixel.xyz;
     vec3 pixel_delta_right = push_constants.pixel_delta_right.xyz;
     vec3 pixel_delta_down = push_constants.pixel_delta_down.xyz;
-    vec3 camera_center = push_constants.camera_center.xyz;
+    vec3 camera_center = vec3(push_constants.camera_x, push_constants.camera_y, push_constants.camera_z);
 
     vec3 pixelCenter = top_left_pixel + gl_GlobalInvocationID.x * pixel_delta_right + gl_GlobalInvocationID.y * pixel_delta_down;
     vec3 rayDirection = normalize(pixelCenter - camera_center);
