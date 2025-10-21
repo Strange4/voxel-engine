@@ -91,7 +91,7 @@ pub struct Engine {
 // and: https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.align-packed
 // cool visualizer: https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/
 #[repr(C)]
-#[derive(BufferContents, Clone, Copy, Default)]
+#[derive(BufferContents, Clone, Copy)]
 struct PushConstants {
     top_left_pixel: Vec3,
     camera_x: f32,
@@ -148,7 +148,13 @@ impl Engine {
             },
         );
 
-        let mut s = Self {
+        let camera_y_radians =  f32::consts::FRAC_PI_2;
+        let camera_x_radians =  -f32::consts::FRAC_PI_2;
+        let camera_radius =  40.0;
+
+        let ray_dependencies = compute_ray_dependencies(&last_image_size, camera_y_radians, camera_x_radians, camera_radius);
+
+        Self {
             recreate_swapchain: false,
             previous_fence: 0,
             device: device.clone(),
@@ -164,21 +170,18 @@ impl Engine {
             )),
             should_record: vec![true; images_and_views.len()],
             present_images: images_and_views,
-            camera_x_radians: -f32::consts::FRAC_PI_2,
-            camera_y_radians: f32::consts::FRAC_PI_2,
-            camera_radius: 40.0,
+            camera_x_radians,
+            camera_y_radians,
+            camera_radius,
             query_pool,
             timing_period: physical_device.properties().timestamp_period as f64,
             gui,
             compute_time: 0.0,
             copy_time: 0.0,
-            ray_dependencies: PushConstants::default(),
+            ray_dependencies,
             last_image_size,
-        };
 
-        s.compute_ray_dependencies();
-
-        s
+        }
     }
 
     pub fn draw(&mut self, window: &Arc<Window>, window_resized: bool) {
@@ -204,7 +207,7 @@ impl Engine {
                 self.output_images = output_images;
                 self.descriptor_sets = descriptor_sets;
                 self.last_image_size = [new_dimensions.width as f32, new_dimensions.height as f32];
-                self.compute_ray_dependencies();
+                self.ray_dependencies = compute_ray_dependencies(&self.last_image_size, self.camera_y_radians, self.camera_x_radians, self.camera_radius);
             }
         }
         let err =
@@ -298,18 +301,18 @@ impl Engine {
 
     pub fn move_horizontally(&mut self, amount_radians: f32) {
         self.camera_x_radians += amount_radians;
-        self.compute_ray_dependencies();
+        self.ray_dependencies = compute_ray_dependencies(&self.last_image_size, self.camera_y_radians, self.camera_x_radians, self.camera_radius);
     }
 
     pub fn move_vertically(&mut self, amount_radians: f32) {
         self.camera_y_radians =
             (self.camera_y_radians + amount_radians).clamp(0.001, f32::consts::PI - 0.001);
-        self.compute_ray_dependencies();
+        self.ray_dependencies = compute_ray_dependencies(&self.last_image_size, self.camera_y_radians, self.camera_x_radians, self.camera_radius);
     }
 
     pub fn move_forward(&mut self, amount: f32) {
         self.camera_radius += amount;
-        self.compute_ray_dependencies();
+        self.ray_dependencies = compute_ray_dependencies(&self.last_image_size, self.camera_y_radians, self.camera_x_radians, self.camera_radius);
     }
 
     fn update_query_timings(&mut self, swap_image_index: u32) {
@@ -338,15 +341,18 @@ impl Engine {
         self.should_record[swap_image_index as usize] = all_available;
     }
 
-    fn compute_ray_dependencies(&mut self) {
+    
+}
+
+fn compute_ray_dependencies(image_size: &[f32;2], camera_y_radians: f32, camera_x_radians: f32, camera_radius: f32) -> PushConstants {
         const VIEWPORT_HEIGHT: f32 = 30.0;
         const UP_VECTOR: Vec3 = vec3(0.0, -1.0, 0.0);
-        let image_width = self.last_image_size[0];
-        let image_height = self.last_image_size[1];
-        let sin = self.camera_y_radians.sin();
-        let x = self.camera_radius * self.camera_x_radians.cos() * sin;
-        let y = self.camera_radius * self.camera_y_radians.cos();
-        let z = self.camera_radius * self.camera_x_radians.sin() * sin;
+        let image_width = image_size[0];
+        let image_height = image_size[1];
+        let sin = camera_y_radians.sin();
+        let x = camera_radius * camera_x_radians.cos() * sin;
+        let y = camera_radius * camera_y_radians.cos();
+        let z = camera_radius * camera_x_radians.sin() * sin;
         let camera_center = vec3(x, y, z);
 
         let aspect_ratio = image_width / image_height;
@@ -364,7 +370,7 @@ impl Engine {
         let viepwort_upper_left = -viewport_down_vector * 0.5 - viewport_right_vector * 0.5;
         let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
 
-        self.ray_dependencies = PushConstants {
+        return PushConstants {
             top_left_pixel,
             pixel_delta_right,
             pixel_delta_down,
@@ -373,7 +379,6 @@ impl Engine {
             camera_z: camera_center.z,
         }
     }
-}
 
 fn draw_gui(gui: &mut Gui, compute_time: f64, copy_time: f64) {
     gui.immediate_ui(|gui| {

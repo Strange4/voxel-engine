@@ -1,5 +1,7 @@
 # TODO
 
+### Create a benchmarker using criterion and providing the gpu frame time to `iter_custom`.
+
 ### use sparse voxel octrees in traversal and storage
 
 ### Generate different models to visualize
