@@ -12,6 +12,28 @@ Should probably add turn on and off features in the ui so that I can see the per
 
 ## Benchark log
 
+#### Creating an actual benchmarker
+
+Starting the window, the engine and then looking at frame time is not a great idea for benchmarking. This is because to test different angles, setups would mean the steps of running the app, wait for the window to appear, move to a specific position in the world would take a long time between retries. But also, the setups could be incosistent and tedious. However, benchmarking this game engine is not a simple task.
+
+There are two options that present ourselves that have various pros and cons:
+1. Create my own benchmarker
+    - Pros:
+        - Don't have to rewrite code
+        - Can view the tests while they are running!
+        - Creating a benchmarking app would be kinda cool
+    - Cons:
+        - Would have to transform the Application part of the code into having a whole benchmarking suite
+2. Use an external library
+    - Pros:
+        - Don't have to write an entire library to benchmark
+        - Could use cirterion that can use statistics, plots and "more rigorous" benchmarking
+        - Would decouple the code into making the entire engine run as a headless application rendering to an image
+        - The benchmarking part of the engine would be decoupled from the application
+        - Running benchmarks would be less tedious
+    - Cons:
+        - Rewriting a lot of code
+
 #### Precomputing camera viewport
 - Compute shader time: 0.74ms (20% improvement!)
 - Copy to present image time: 0.26ms

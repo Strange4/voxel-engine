@@ -3,6 +3,16 @@ name = "voxel-engine"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "voxel_engine"
+path = "src/lib/lib.rs"
+bench = false
+
+[[bin]]
+name = "voxel-renderer-app"
+path = "src/main.rs"
+bench = false
+
 [dependencies]
 egui = "0.31"
 egui_winit_vulkano = "0.28.0"
@@ -11,3 +21,11 @@ vulkano = "0.35"
 vulkano-shaders = { version = "0.35.0" }
 # vulkano-shaders = { version = "0.35.0", features = ["shaderc-debug"] } # add this when you want to step through shaders in renderdoc
 winit = "0.30"
+
+[dev-dependencies]
+criterion = { version = "0.3", features = ["html_reports"]}
+
+
+[[bench]]
+name = "voxel_engine_benchmarker"
+harness = false

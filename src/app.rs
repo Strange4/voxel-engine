@@ -1,6 +1,6 @@
-use crate::engine::Engine;
 use core::f32;
 use std::sync::Arc;
+use voxel_engine::engine::Engine;
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, WindowEvent},

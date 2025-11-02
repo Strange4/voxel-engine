@@ -12,6 +12,11 @@ use winit::dpi::PhysicalSize;
 use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::Window;
 
+pub enum ExecutionType {
+    Headless,
+    Windowed(Window),
+}
+
 fn get_device_extentions() -> DeviceExtensions {
     DeviceExtensions {
         khr_swapchain: true,
@@ -19,7 +24,12 @@ fn get_device_extentions() -> DeviceExtensions {
     }
 }
 
-pub fn get_instance(window: &Arc<Window>) -> Arc<Instance> {
+pub fn get_headless_instance() -> Arc<Instance> {
+    let library = VulkanLibrary::new().expect("Couldn't find the vulkan library");
+    Instance::new(library, InstanceCreateInfo::default()).unwrap()
+}
+
+pub fn get_windowed_instance(window: &Arc<Window>) -> Arc<Instance> {
     let mut extensions = InstanceExtensions {
         khr_surface: true,
         ..InstanceExtensions::empty()
@@ -78,7 +88,7 @@ pub fn get_swapchain(
     .unwrap()
 }
 
-pub fn get_physical_device_and_family_index(
+pub fn get_physical_device_and_family_index_for_surface(
     surface: &Arc<Surface>,
     instance: &Arc<Instance>,
 ) -> (Arc<PhysicalDevice>, u32) {
@@ -113,6 +123,34 @@ pub fn get_physical_device_and_family_index(
         .unwrap()
 }
 
+pub fn get_physical_device_and_family_index(instance: &Arc<Instance>) -> (Arc<PhysicalDevice>, u32) {
+    instance
+        .enumerate_physical_devices()
+        .unwrap()
+        .filter(|d| d.properties().timestamp_period > 0.0)
+        .filter_map(|d| {
+            d.queue_family_properties()
+                .iter()
+                .enumerate()
+                .position(|(i, queue)| {
+                    let flags = &queue.queue_flags;
+                    let has_timestamp_property = queue.timestamp_valid_bits.is_some();
+                    has_timestamp_property
+                        && flags.contains(QueueFlags::GRAPHICS)
+                        && flags.contains(QueueFlags::COMPUTE)
+                })
+                .map(|p| (d, p as u32))
+        })
+        .min_by_key(|(p, _)| match p.properties().device_type {
+            vulkano::device::physical::PhysicalDeviceType::DiscreteGpu => 1,
+            vulkano::device::physical::PhysicalDeviceType::IntegratedGpu => 2,
+            vulkano::device::physical::PhysicalDeviceType::VirtualGpu => 3,
+            vulkano::device::physical::PhysicalDeviceType::Cpu => 4,
+            _ => 4,
+        })
+        .unwrap()
+}
+
 pub fn get_device_and_queue(
     physical_device: Arc<PhysicalDevice>,
     queue_family_index: u32,
@@ -125,6 +163,24 @@ pub fn get_device_and_queue(
                 ..Default::default()
             }],
             enabled_extensions: get_device_extentions(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let queue = queues.next().unwrap();
+
+    (device, queue)
+}
+
+pub fn get_headless_device_and_queue(physical_device: Arc<PhysicalDevice>, queue_family_index: u32) -> (Arc<Device>, Arc<Queue>) {
+    let (device, mut queues) = Device::new(
+        physical_device,
+        DeviceCreateInfo {
+            queue_create_infos: vec![QueueCreateInfo {
+                queue_family_index,
+                ..Default::default()
+            }],
             ..Default::default()
         },
     )
