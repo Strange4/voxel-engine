@@ -28,7 +28,7 @@ use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
 use vulkano::pipeline::{
     ComputePipeline, Pipeline, PipelineBindPoint, PipelineLayout, PipelineShaderStageCreateInfo,
 };
-use vulkano::query::{self, QueryPool, QueryPoolCreateInfo, QueryResultFlags, QueryType};
+use vulkano::query::{QueryPool, QueryPoolCreateInfo, QueryResultFlags, QueryType};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{
     self, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo,
@@ -47,32 +47,19 @@ use crate::vulkan::starter::{
     get_swapchain, get_windowed_instance,
 };
 
-type CommandBufferFence = Arc<FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>>;
+type SwapchainFenceFuture = FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>;
+type FenceFuture = FenceSignalFuture<CommandBufferExecFuture<Box<dyn GpuFuture>>>;
 
 const MAX_TIMESTAMP_QUERIES_PER_IMAGE: u32 = 3;
 
-pub struct Engine {
-    // This is here so that we can modify it every frame by the app.
-    // using a spherical coordinate system: https://en.m.wikipedia.org/wiki/Spherical_coordinate_system
-    camera_x_radians: f32, // the angle off of the x vector
-    camera_y_radians: f32, // the angle off of the z vector
-    camera_radius: f32,
+pub struct BetterEngine<T> {
+    engine_parts: EngineParts,
 
-    // stuff that we want to precompute
-    ray_dependencies: PushConstants,
-    last_image_size: [u32; 2],
+    renderer: T,
+}
 
-    // Vulkan nececities
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-
-    // stuff required for the compute shader
-    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    compute_pipeline: Arc<ComputePipeline>,
-
-    // for timings
-    query_pool: Arc<QueryPool>,
-    timestamp_period: f64,
+pub struct WindowedEngine {
+    // for keeping timestamps in case they aren't available yet
     compute_time: f64,
     copy_time: f64,
 
@@ -80,18 +67,17 @@ pub struct Engine {
     recreate_swapchain: bool,
     swapchain: Arc<Swapchain>,
     previous_fence: usize,
-    fences: Vec<Option<CommandBufferFence>>,
+    fences: Vec<Option<SwapchainFenceFuture>>,
     should_record: Vec<bool>,
 
     // for setting which image the engine should render into
     output_images: Vec<Arc<Image>>,
-    present_images: Vec<(Arc<Image>, Arc<ImageView>)>,
+    present_images_and_views: Vec<(Arc<Image>, Arc<ImageView>)>,
     descriptor_sets: Vec<Arc<DescriptorSet>>,
 
     gui: Gui,
 }
-
-struct EngineParts {
+pub struct EngineParts {
     camera_x_radians: f32, // the angle off of the x vector
     camera_y_radians: f32, // the angle off of the z vector
     camera_radius: f32,
@@ -114,9 +100,8 @@ struct EngineParts {
 }
 
 pub struct HeadlessEngine {
-    engine_parts: EngineParts,
     descriptor_set: Arc<DescriptorSet>,
-    fence: Option<Arc<FenceSignalFuture<CommandBufferExecFuture<Box<dyn GpuFuture>>>>>,
+    fence: Option<FenceFuture>,
     output_image: Arc<Image>,
 }
 
@@ -136,8 +121,75 @@ struct PushConstants {
     camera_z: f32,
 }
 
-impl HeadlessEngine {
+impl <T> BetterEngine<T> {
+    pub fn move_horizontally(&mut self, amount_radians: f32) {
+        self.engine_parts.camera_x_radians += amount_radians;
+        self.engine_parts.push_contants = compute_ray_dependencies(
+            &self.engine_parts.last_image_size,
+            self.engine_parts.camera_y_radians,
+            self.engine_parts.camera_x_radians,
+            self.engine_parts.camera_radius,
+        );
+    }
+
+    pub fn move_vertically(&mut self, amount_radians: f32) {
+        self.engine_parts.camera_y_radians =
+            (self.engine_parts.camera_y_radians + amount_radians).clamp(0.001, f32::consts::PI - 0.001);
+        self.engine_parts.push_contants = compute_ray_dependencies(
+            &self.engine_parts.last_image_size,
+            self.engine_parts.camera_y_radians,
+            self.engine_parts.camera_x_radians,
+            self.engine_parts.camera_radius,
+        );
+    }
+
+    pub fn move_forward(&mut self, amount: f32) {
+        self.engine_parts.camera_radius += amount;
+        self.engine_parts.push_contants = compute_ray_dependencies(
+            &self.engine_parts.last_image_size,
+            self.engine_parts.camera_y_radians,
+            self.engine_parts.camera_x_radians,
+            self.engine_parts.camera_radius,
+        );
+    }
+}
+
+impl BetterEngine<WindowedEngine> {
+    pub fn new(window: Arc<Window>, event_loop: &ActiveEventLoop) -> Self {
+        let (renderer, engine_parts) = WindowedEngine::new_with_parts(window, event_loop);
+
+        Self {
+            engine_parts,
+            renderer,
+        }
+    }
+
+    pub fn draw(&mut self, window: &Arc<Window>, window_resized: bool) {
+        self.renderer.draw(window, window_resized, &mut self.engine_parts);
+    }
+
+    /// See docs for pass_event_to_gui
+    pub fn handle_event(&mut self, event: &WindowEvent) -> bool {
+        self.renderer.pass_event_to_gui(event)
+    }
+}
+
+impl BetterEngine<HeadlessEngine> {
     pub fn new(output_image_size: [u32; 2]) -> Self {
+        let (renderer, engine_parts) = HeadlessEngine::new_with_parts(output_image_size);
+        Self {
+            engine_parts,
+            renderer,
+        }
+    }
+
+    pub fn draw(&mut self) -> Option<f64> {
+        self.renderer.draw(&self.engine_parts)
+    }
+}
+
+impl HeadlessEngine {
+    fn new_with_parts(output_image_size: [u32; 2]) -> (Self, EngineParts) {
         let instance = get_headless_instance();
 
         let (physical_device, queue_family_index) = get_physical_device_and_family_index(&instance);
@@ -151,6 +203,7 @@ impl HeadlessEngine {
             queue,
             MAX_TIMESTAMP_QUERIES_PER_IMAGE,
         );
+
         let (descriptor_set, output_image) = create_descriptor_set_and_output_image(
             &engine_parts.device,
             &engine_parts.queue,
@@ -159,24 +212,26 @@ impl HeadlessEngine {
             engine_parts.command_buffer_allocator.clone(),
         );
 
-        Self {
-            engine_parts,
+        let me = Self {
             descriptor_set,
             fence: None,
             output_image,
-        }
+        };
+
+        (me, engine_parts)
     }
 
     /// Draws a single image and returns the amount of time that the GPU took to render that image
-    /// 
+    ///
     /// Note: this function *waits* for the timings from the GPU to be returned.
-    /// 
-    /// Because of the differences between a windowed engine, comparing benchmarks 
+    ///
+    /// Because of the differences between a windowed engine, comparing benchmarks
     /// should only be done with other benchmarks of this function.
-    pub fn draw(&mut self) -> Option<f64> {
-        let previous_future = match self.fence.clone() {
+    fn draw(&mut self, engine_parts: &EngineParts) -> Option<f64> {
+        
+        let previous_future = match self.fence.take() {
             None => {
-                let mut now = sync::now(self.engine_parts.device.clone());
+                let mut now = sync::now(engine_parts.device.clone());
                 now.cleanup_finished();
                 now.boxed()
             }
@@ -187,13 +242,13 @@ impl HeadlessEngine {
         };
 
         let command_buffer = create_draw_to_image_command_buffer(
-            self.engine_parts.push_contants.clone(),
+            engine_parts.push_contants,
             self.descriptor_set.clone(),
-            self.engine_parts.command_buffer_allocator.clone(),
+            engine_parts.command_buffer_allocator.clone(),
             &self.output_image,
-            &self.engine_parts.queue,
-            self.engine_parts.compute_pipeline.clone(),
-            &self.engine_parts.query_pool,
+            &engine_parts.queue,
+            engine_parts.compute_pipeline.clone(),
+            &engine_parts.query_pool,
             true,
             0,
         )
@@ -201,21 +256,21 @@ impl HeadlessEngine {
         .unwrap();
 
         let execution = previous_future
-            .then_execute(self.engine_parts.queue.clone(), command_buffer)
+            .then_execute(engine_parts.queue.clone(), command_buffer)
             .unwrap()
             .then_signal_fence_and_flush();
 
         let future = match execution.map_err(Validated::unwrap) {
-            Ok(future) => Some(Arc::new(future)),
+            Ok(future) => Some(future),
             Err(err) => panic!("{err}"),
         };
         self.fence = future;
 
         let timings = get_query_timings(
-            &self.engine_parts.query_pool,
+            &engine_parts.query_pool,
             0,
             2,
-            self.engine_parts.timestamp_period,
+            engine_parts.timestamp_period,
             true,
         )
         .unwrap();
@@ -229,8 +284,8 @@ impl HeadlessEngine {
     }
 }
 
-impl Engine {
-    pub fn new(window: Arc<Window>, event_loop: &ActiveEventLoop) -> Self {
+impl WindowedEngine {
+    fn new_with_parts(window: Arc<Window>, event_loop: &ActiveEventLoop) -> (Self, EngineParts) {
         let instance = get_windowed_instance(&window);
         let surface = Surface::from_window(instance.clone(), window.clone()).unwrap();
         let dimensions = window.inner_size();
@@ -254,14 +309,13 @@ impl Engine {
         let (output_images, descriptor_sets) =
             create_descriptor_sets_and_output_images(&images, &compute_pipeline, &queue, &device);
 
-        let query_pool = QueryPool::new(
-            device.clone(),
-            QueryPoolCreateInfo {
-                query_count: images.len() as u32 * MAX_TIMESTAMP_QUERIES_PER_IMAGE,
-                ..QueryPoolCreateInfo::query_type(QueryType::Timestamp)
-            },
-        )
-        .unwrap();
+        let engine_parts = create_engine_parts(
+            last_image_size,
+            &physical_device,
+            device,
+            queue.clone(),
+            images.len() as u32 * MAX_TIMESTAMP_QUERIES_PER_IMAGE,
+        );
 
         let images_and_views = get_images_and_views(images);
 
@@ -276,48 +330,33 @@ impl Engine {
             },
         );
 
-        let camera_y_radians = f32::consts::FRAC_PI_2;
-        let camera_x_radians = -f32::consts::FRAC_PI_2;
-        let camera_radius = 40.0;
+        let mut fences = Vec::with_capacity(images_and_views.len());
 
-        let ray_dependencies = compute_ray_dependencies(
-            &last_image_size,
-            camera_y_radians,
-            camera_x_radians,
-            camera_radius,
-        );
+        // rust can't clone an option of none...
+        for _ in 0..images_and_views.len() {
+            fences.push(None);
+        }
 
-        Self {
-            recreate_swapchain: false,
-            previous_fence: 0,
-            device: device.clone(),
-            compute_pipeline,
-            swapchain,
-            queue,
-            fences: vec![None; images_and_views.len()],
-            descriptor_sets,
-            output_images,
-            command_buffer_allocator: Arc::new(StandardCommandBufferAllocator::new(
-                device.clone(),
-                Default::default(),
-            )),
-            should_record: vec![true; images_and_views.len()],
-            present_images: images_and_views,
-            camera_x_radians,
-            camera_y_radians,
-            camera_radius,
-            query_pool,
-            timestamp_period: physical_device.properties().timestamp_period as f64,
-            gui,
+
+        let renderer = Self {
             compute_time: 0.0,
             copy_time: 0.0,
-            ray_dependencies,
-            last_image_size,
-        }
+            recreate_swapchain: false,
+            swapchain,
+            previous_fence: 0,
+            fences,
+            should_record: vec![true; images_and_views.len()],
+            output_images,
+            present_images_and_views: images_and_views,
+            descriptor_sets,
+            gui,
+        };
+
+        (renderer, engine_parts)
     }
 
-    pub fn draw(&mut self, window: &Arc<Window>, window_resized: bool) {
-        self.handle_recreate_swapchain(window, window_resized);
+    fn draw(&mut self, window: &Arc<Window>, window_resized: bool, engine_parts: &mut EngineParts) {
+        self.handle_recreate_swapchain(window, window_resized, engine_parts);
 
         // draw the gui before we have to wait for the fence. We will have to wait for the fence less
         draw_gui(&mut self.gui, self.compute_time, self.copy_time);
@@ -335,9 +374,11 @@ impl Engine {
             image_fence.wait(None).unwrap();
         }
 
-        let previous_future = match self.fences[self.previous_fence].clone() {
+        
+
+        let previous_future = match self.fences.remove(self.previous_fence){
             None => {
-                let mut now = sync::now(self.device.clone());
+                let mut now = sync::now(engine_parts.device.clone());
                 now.cleanup_finished();
                 now.boxed()
             }
@@ -345,33 +386,33 @@ impl Engine {
         };
 
         let command_buffer = create_draw_to_swapchain_command_buffer(
-            self.ray_dependencies,
+            engine_parts.push_contants,
             self.descriptor_sets[swap_image_index as usize].clone(),
-            self.command_buffer_allocator.clone(),
-            self.present_images[swap_image_index as usize].0.clone(),
+            engine_parts.command_buffer_allocator.clone(),
+            self.present_images_and_views[swap_image_index as usize].0.clone(),
             self.output_images[swap_image_index as usize].clone(),
-            &self.queue,
-            self.compute_pipeline.clone(),
-            self.query_pool.clone(),
+            &engine_parts.queue,
+            engine_parts.compute_pipeline.clone(),
+            engine_parts.query_pool.clone(),
             swap_image_index,
             self.should_record[swap_image_index as usize],
         );
 
-        self.update_query_timings(swap_image_index);
+        self.update_query_timings(swap_image_index, &engine_parts.query_pool, engine_parts.timestamp_period);
 
         let execution = previous_future
             .join(acquire_future)
-            .then_execute(self.queue.clone(), command_buffer)
+            .then_execute(engine_parts.queue.clone(), command_buffer)
             .unwrap();
 
         let execution = self
             .gui
             .draw_on_image(
                 execution,
-                self.present_images[swap_image_index as usize].1.clone(),
+                self.present_images_and_views[swap_image_index as usize].1.clone(),
             )
             .then_swapchain_present(
-                self.queue.clone(),
+                engine_parts.queue.clone(),
                 SwapchainPresentInfo::swapchain_image_index(
                     self.swapchain.clone(),
                     swap_image_index,
@@ -380,14 +421,15 @@ impl Engine {
             .then_signal_fence_and_flush();
 
         let future = match execution.map_err(Validated::unwrap) {
-            Ok(future) => Some(Arc::new(future)),
+            Ok(future) => Some(future),
             Err(VulkanError::OutOfDate) => {
                 self.recreate_swapchain = true;
                 None
             }
             Err(err) => panic!("{err}"),
         };
-        self.fences[swap_image_index as usize] = future;
+        self.fences.insert(swap_image_index as usize, future);
+        // self.fences[swap_image_index as usize] = future;
 
         self.previous_fence = swap_image_index as usize;
     }
@@ -395,48 +437,17 @@ impl Engine {
     /// Returns true when the event should NOT be passed to the rest of the renderer. False when it should
     ///
     /// e.g. when you click on a egui window you don't want it to go to the renderer
-    pub fn pass_event_to_gui(&mut self, event: &WindowEvent) -> bool {
+    fn pass_event_to_gui(&mut self, event: &WindowEvent) -> bool {
         self.gui.update(event)
     }
 
-    pub fn move_horizontally(&mut self, amount_radians: f32) {
-        self.camera_x_radians += amount_radians;
-        self.ray_dependencies = compute_ray_dependencies(
-            &self.last_image_size,
-            self.camera_y_radians,
-            self.camera_x_radians,
-            self.camera_radius,
-        );
-    }
-
-    pub fn move_vertically(&mut self, amount_radians: f32) {
-        self.camera_y_radians =
-            (self.camera_y_radians + amount_radians).clamp(0.001, f32::consts::PI - 0.001);
-        self.ray_dependencies = compute_ray_dependencies(
-            &self.last_image_size,
-            self.camera_y_radians,
-            self.camera_x_radians,
-            self.camera_radius,
-        );
-    }
-
-    pub fn move_forward(&mut self, amount: f32) {
-        self.camera_radius += amount;
-        self.ray_dependencies = compute_ray_dependencies(
-            &self.last_image_size,
-            self.camera_y_radians,
-            self.camera_x_radians,
-            self.camera_radius,
-        );
-    }
-
-    fn update_query_timings(&mut self, swap_image_index: u32) {
+    fn update_query_timings(&mut self, swap_image_index: u32, query_pool: &Arc<QueryPool>, timestamp_period: f64) {
         let timestamp_index = swap_image_index * MAX_TIMESTAMP_QUERIES_PER_IMAGE;
         let query_timings = get_query_timings(
-            &self.query_pool,
+            query_pool,
             timestamp_index,
             MAX_TIMESTAMP_QUERIES_PER_IMAGE,
-            self.timestamp_period,
+            timestamp_period,
             false,
         );
         if let Some(timings) = &query_timings {
@@ -447,7 +458,7 @@ impl Engine {
         self.should_record[swap_image_index as usize] = query_timings.is_some();
     }
 
-    fn handle_recreate_swapchain(&mut self, window: &Arc<Window>, window_resized: bool) {
+    fn handle_recreate_swapchain(&mut self, window: &Arc<Window>, window_resized: bool, engine_parts: &mut EngineParts) {
         if !self.recreate_swapchain && !window_resized {
             return;
         }
@@ -469,19 +480,20 @@ impl Engine {
 
         let (output_images, descriptor_sets) = create_descriptor_sets_and_output_images(
             &new_images,
-            &self.compute_pipeline,
-            &self.queue,
-            &self.device,
+            &engine_parts.compute_pipeline,
+            &engine_parts.queue,
+            &engine_parts.device,
         );
-        self.present_images = get_images_and_views(new_images);
+        self.present_images_and_views = get_images_and_views(new_images);
         self.output_images = output_images;
         self.descriptor_sets = descriptor_sets;
-        self.last_image_size = [new_dimensions.width, new_dimensions.height];
-        self.ray_dependencies = compute_ray_dependencies(
-            &self.last_image_size,
-            self.camera_y_radians,
-            self.camera_x_radians,
-            self.camera_radius,
+        engine_parts.last_image_size = [new_dimensions.width, new_dimensions.height];
+
+        engine_parts.push_contants = compute_ray_dependencies(
+            &engine_parts.last_image_size,
+            engine_parts.camera_y_radians,
+            engine_parts.camera_x_radians,
+            engine_parts.camera_radius,
         );
     }
 
@@ -503,6 +515,56 @@ impl Engine {
         }
 
         Some((swap_image_index, acquire_future))
+    }
+}
+
+/// please input the TOTAL number_of_queries that the query pool can have
+/// If you have a swapchain and each image does a query, multiply them
+fn create_engine_parts(
+    output_image_size: [u32; 2],
+    physical_device: &Arc<PhysicalDevice>,
+    device: Arc<Device>,
+    queue: Arc<Queue>,
+    query_count: u32,
+) -> EngineParts {
+    let camera_y_radians = f32::consts::FRAC_PI_2;
+    let camera_x_radians = -f32::consts::FRAC_PI_2;
+    let camera_radius = 40.0;
+    let push_contants = compute_ray_dependencies(
+        &output_image_size,
+        camera_y_radians,
+        camera_x_radians,
+        camera_radius,
+    );
+
+    let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
+        device.clone(),
+        Default::default(),
+    ));
+    let compute_shader = cs::load(device.clone()).unwrap();
+    let compute_pipeline = get_compute_pipeline(&device, &compute_shader);
+
+    let query_pool = QueryPool::new(
+        device.clone(),
+        QueryPoolCreateInfo {
+            query_count,
+            ..QueryPoolCreateInfo::query_type(QueryType::Timestamp)
+        },
+    )
+    .unwrap();
+
+    EngineParts {
+        camera_x_radians,
+        camera_y_radians,
+        camera_radius,
+        push_contants,
+        device,
+        queue,
+        command_buffer_allocator,
+        compute_pipeline,
+        query_pool,
+        timestamp_period: physical_device.properties().timestamp_period as f64,
+        last_image_size: output_image_size
     }
 }
 
@@ -590,14 +652,14 @@ fn compute_ray_dependencies(
     let viepwort_upper_left = -viewport_down_vector * 0.5 - viewport_right_vector * 0.5;
     let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
 
-    return PushConstants {
+    PushConstants {
         top_left_pixel,
         pixel_delta_right,
         pixel_delta_down,
         camera_x: camera_center.x,
         camera_y: camera_center.y,
         camera_z: camera_center.z,
-    };
+    }
 }
 
 fn draw_gui(gui: &mut Gui, compute_time: f64, copy_time: f64) {
@@ -610,8 +672,8 @@ fn draw_gui(gui: &mut Gui, compute_time: f64, copy_time: f64) {
             .anchor(Align2::LEFT_TOP, [5.0, 5.0])
             .auto_sized()
             .show(&ctx, |ui| {
-                ui.label(format!("Compute time: {compute_time_ms:.3}ns"));
-                ui.label(format!("Copy time: {copy_time_ms:.3}ns"));
+                ui.label(format!("Compute time: {compute_time_ms:.3}ms"));
+                ui.label(format!("Copy time: {copy_time_ms:.3}ms"));
             });
     });
 }
@@ -620,18 +682,16 @@ fn get_images_and_views(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageVi
     images
         .into_iter()
         .map(|image| {
-            (
+            let view = ImageView::new(
                 image.clone(),
-                ImageView::new(
-                    image.clone(),
-                    ImageViewCreateInfo {
-                        format: image.format(),
-                        subresource_range: image.subresource_range(),
-                        ..Default::default()
-                    },
-                )
-                .unwrap(),
+                ImageViewCreateInfo {
+                    format: image.format(),
+                    subresource_range: image.subresource_range(),
+                    ..Default::default()
+                },
             )
+            .unwrap();
+            (image, view)
         })
         .collect()
 }
@@ -780,56 +840,6 @@ fn create_draw_to_image_command_buffer(
     }
 
     builder
-}
-
-/// `number_of_queries` is the TOTAL number_of_queries that the query pool can have
-/// If you have a swapchain and each image does a query, multiply them
-fn create_engine_parts(
-    output_image_size: [u32; 2],
-    physical_device: &Arc<PhysicalDevice>,
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-    query_count: u32,
-) -> EngineParts {
-    let camera_y_radians = f32::consts::FRAC_PI_2;
-    let camera_x_radians = -f32::consts::FRAC_PI_2;
-    let camera_radius = 40.0;
-    let push_contants = compute_ray_dependencies(
-        &output_image_size,
-        camera_y_radians,
-        camera_x_radians,
-        camera_radius,
-    );
-
-    let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
-    let compute_shader = cs::load(device.clone()).unwrap();
-    let compute_pipeline = get_compute_pipeline(&device, &compute_shader);
-
-    let query_pool = QueryPool::new(
-        device.clone(),
-        QueryPoolCreateInfo {
-            query_count,
-            ..QueryPoolCreateInfo::query_type(QueryType::Timestamp)
-        },
-    )
-    .unwrap();
-
-    EngineParts {
-        camera_x_radians,
-        camera_y_radians,
-        camera_radius,
-        push_contants,
-        last_image_size: output_image_size,
-        device,
-        queue,
-        command_buffer_allocator,
-        compute_pipeline,
-        query_pool,
-        timestamp_period: physical_device.properties().timestamp_period as f64,
-    }
 }
 
 fn create_descriptor_set_and_output_image(
@@ -1006,7 +1016,7 @@ fn create_model_and_fill(
 fn get_model_data(diameter: u32) -> Vec<u8> {
     let bytes_per_texel = 4;
     let diameter = diameter as usize;
-    let mut data = vec![0; (diameter * bytes_per_texel * diameter * diameter) as usize];
+    let mut data = vec![0; diameter * bytes_per_texel * diameter * diameter];
     let radius = diameter / 2;
     for z in 0..diameter {
         for y in 0..diameter {

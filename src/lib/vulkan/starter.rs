@@ -12,11 +12,6 @@ use winit::dpi::PhysicalSize;
 use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::Window;
 
-pub enum ExecutionType {
-    Headless,
-    Windowed(Window),
-}
-
 fn get_device_extentions() -> DeviceExtensions {
     DeviceExtensions {
         khr_swapchain: true,
@@ -132,7 +127,7 @@ pub fn get_physical_device_and_family_index(instance: &Arc<Instance>) -> (Arc<Ph
             d.queue_family_properties()
                 .iter()
                 .enumerate()
-                .position(|(i, queue)| {
+                .position(|(_, queue)| {
                     let flags = &queue.queue_flags;
                     let has_timestamp_property = queue.timestamp_valid_bits.is_some();
                     has_timestamp_property

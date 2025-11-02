@@ -1,6 +1,6 @@
 use core::f32;
 use std::sync::Arc;
-use voxel_engine::engine::Engine;
+use voxel_engine::engine::{BetterEngine, WindowedEngine};
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, WindowEvent},
@@ -14,16 +14,17 @@ const RADIUS_MOVE_AMOUNT: f32 = f32::consts::FRAC_PI_8 / 2.0;
 #[derive(Default)]
 pub struct App {
     window: Option<Arc<Window>>,
-    engine: Option<Engine>,
+    engine: Option<BetterEngine<WindowedEngine>>,
     window_resize: bool,
 }
+
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = WindowAttributes::default().with_title("Voxel Engine");
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.window = Some(window.clone());
-        self.engine = Some(Engine::new(window, event_loop))
+        self.engine = Some(BetterEngine::<WindowedEngine>::new(window, event_loop))
     }
 
     fn window_event(
@@ -34,7 +35,7 @@ impl ApplicationHandler for App {
     ) {
         let engine = self.engine.as_mut().unwrap();
         let window = self.window.as_ref().unwrap();
-        if engine.pass_event_to_gui(&event) {
+        if engine.handle_event(&event) {
             return
         }
         match event {
