@@ -95,5 +95,6 @@ void main() {
     vec3 pixelCenter = top_left_pixel + gl_GlobalInvocationID.x * pixel_delta_right + gl_GlobalInvocationID.y * pixel_delta_down;
     vec3 rayDirection = normalize(pixelCenter - camera_center);
     Ray ray = Ray(camera_center, rayDirection);
-    imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), rayColor(ray));
+    vec4 color = rayColor(ray);
+    imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), color);
 }

@@ -105,6 +105,8 @@ pub struct HeadlessEngine {
     output_image: Arc<Image>,
 }
 
+// Vec3's get padded to vec 4's anyway. So I instead of leaving those bytes to waste we use them to represent the camera
+
 // we have to use vec4's instead of vec3's because of how the padding in the std140 works.
 // They padd the vec3's to vec4's and when we "read" the vec3's in the shader side they will only read what they need
 // please see: https://learnopengl.com/Advanced-OpenGL/Advanced-GLSL Uniform block layout
@@ -121,7 +123,7 @@ struct PushConstants {
     camera_z: f32,
 }
 
-impl <T> BetterEngine<T> {
+impl<T> BetterEngine<T> {
     pub fn move_horizontally(&mut self, amount_radians: f32) {
         self.engine_parts.camera_x_radians += amount_radians;
         self.engine_parts.push_contants = compute_ray_dependencies(
@@ -133,8 +135,8 @@ impl <T> BetterEngine<T> {
     }
 
     pub fn move_vertically(&mut self, amount_radians: f32) {
-        self.engine_parts.camera_y_radians =
-            (self.engine_parts.camera_y_radians + amount_radians).clamp(0.001, f32::consts::PI - 0.001);
+        self.engine_parts.camera_y_radians = (self.engine_parts.camera_y_radians + amount_radians)
+            .clamp(0.001, f32::consts::PI - 0.001);
         self.engine_parts.push_contants = compute_ray_dependencies(
             &self.engine_parts.last_image_size,
             self.engine_parts.camera_y_radians,
@@ -165,7 +167,8 @@ impl BetterEngine<WindowedEngine> {
     }
 
     pub fn draw(&mut self, window: &Arc<Window>, window_resized: bool) {
-        self.renderer.draw(window, window_resized, &mut self.engine_parts);
+        self.renderer
+            .draw(window, window_resized, &mut self.engine_parts);
     }
 
     /// See docs for pass_event_to_gui
@@ -228,7 +231,6 @@ impl HeadlessEngine {
     /// Because of the differences between a windowed engine, comparing benchmarks
     /// should only be done with other benchmarks of this function.
     fn draw(&mut self, engine_parts: &EngineParts) -> Option<f64> {
-        
         let previous_future = match self.fence.take() {
             None => {
                 let mut now = sync::now(engine_parts.device.clone());
@@ -337,7 +339,6 @@ impl WindowedEngine {
             fences.push(None);
         }
 
-
         let renderer = Self {
             compute_time: 0.0,
             copy_time: 0.0,
@@ -374,9 +375,7 @@ impl WindowedEngine {
             image_fence.wait(None).unwrap();
         }
 
-        
-
-        let previous_future = match self.fences.remove(self.previous_fence){
+        let previous_future = match self.fences.remove(self.previous_fence) {
             None => {
                 let mut now = sync::now(engine_parts.device.clone());
                 now.cleanup_finished();
@@ -389,7 +388,9 @@ impl WindowedEngine {
             engine_parts.push_contants,
             self.descriptor_sets[swap_image_index as usize].clone(),
             engine_parts.command_buffer_allocator.clone(),
-            self.present_images_and_views[swap_image_index as usize].0.clone(),
+            self.present_images_and_views[swap_image_index as usize]
+                .0
+                .clone(),
             self.output_images[swap_image_index as usize].clone(),
             &engine_parts.queue,
             engine_parts.compute_pipeline.clone(),
@@ -398,7 +399,11 @@ impl WindowedEngine {
             self.should_record[swap_image_index as usize],
         );
 
-        self.update_query_timings(swap_image_index, &engine_parts.query_pool, engine_parts.timestamp_period);
+        self.update_query_timings(
+            swap_image_index,
+            &engine_parts.query_pool,
+            engine_parts.timestamp_period,
+        );
 
         let execution = previous_future
             .join(acquire_future)
@@ -409,7 +414,9 @@ impl WindowedEngine {
             .gui
             .draw_on_image(
                 execution,
-                self.present_images_and_views[swap_image_index as usize].1.clone(),
+                self.present_images_and_views[swap_image_index as usize]
+                    .1
+                    .clone(),
             )
             .then_swapchain_present(
                 engine_parts.queue.clone(),
@@ -441,7 +448,12 @@ impl WindowedEngine {
         self.gui.update(event)
     }
 
-    fn update_query_timings(&mut self, swap_image_index: u32, query_pool: &Arc<QueryPool>, timestamp_period: f64) {
+    fn update_query_timings(
+        &mut self,
+        swap_image_index: u32,
+        query_pool: &Arc<QueryPool>,
+        timestamp_period: f64,
+    ) {
         let timestamp_index = swap_image_index * MAX_TIMESTAMP_QUERIES_PER_IMAGE;
         let query_timings = get_query_timings(
             query_pool,
@@ -458,7 +470,12 @@ impl WindowedEngine {
         self.should_record[swap_image_index as usize] = query_timings.is_some();
     }
 
-    fn handle_recreate_swapchain(&mut self, window: &Arc<Window>, window_resized: bool, engine_parts: &mut EngineParts) {
+    fn handle_recreate_swapchain(
+        &mut self,
+        window: &Arc<Window>,
+        window_resized: bool,
+        engine_parts: &mut EngineParts,
+    ) {
         if !self.recreate_swapchain && !window_resized {
             return;
         }
@@ -529,7 +546,7 @@ fn create_engine_parts(
 ) -> EngineParts {
     let camera_y_radians = f32::consts::FRAC_PI_2;
     let camera_x_radians = -f32::consts::FRAC_PI_2;
-    let camera_radius = 40.0;
+    let camera_radius = 1000.0;
     let push_contants = compute_ray_dependencies(
         &output_image_size,
         camera_y_radians,
@@ -564,7 +581,7 @@ fn create_engine_parts(
         compute_pipeline,
         query_pool,
         timestamp_period: physical_device.properties().timestamp_period as f64,
-        last_image_size: output_image_size
+        last_image_size: output_image_size,
     }
 }
 
@@ -627,7 +644,7 @@ fn compute_ray_dependencies(
     camera_x_radians: f32,
     camera_radius: f32,
 ) -> PushConstants {
-    const VIEWPORT_HEIGHT: f32 = 30.0;
+    const VIEWPORT_HEIGHT: f32 = 100.0;
     const UP_VECTOR: Vec3 = vec3(0.0, -1.0, 0.0);
     let image_width = image_size[0] as f32;
     let image_height = image_size[1] as f32;
@@ -961,8 +978,9 @@ fn create_model_and_fill(
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     queue: Arc<Queue>,
 ) -> Arc<Image> {
-    let diameter = 10;
-    let extent = [diameter; 3];
+    let cube_side_length = 100;
+    let colors_per_texel = 4;
+    let extent = [cube_side_length; 3];
     let image = Image::new(
         allocator.clone(),
         ImageCreateInfo {
@@ -987,7 +1005,7 @@ fn create_model_and_fill(
                 | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
-        get_model_data(diameter),
+        get_bulb_model(cube_side_length, colors_per_texel),
     )
     .expect("Couldn't create buffer");
 
@@ -1013,10 +1031,10 @@ fn create_model_and_fill(
         .unwrap();
     image
 }
-fn get_model_data(diameter: u32) -> Vec<u8> {
-    let bytes_per_texel = 4;
-    let diameter = diameter as usize;
-    let mut data = vec![0; diameter * bytes_per_texel * diameter * diameter];
+
+fn get_sphere_model(cube_side_length: u32, colors_per_texel: usize) -> Vec<u8> {
+    let diameter = cube_side_length as usize;
+    let mut data = vec![0; diameter * diameter * diameter * colors_per_texel];
     let radius = diameter / 2;
     for z in 0..diameter {
         for y in 0..diameter {
@@ -1025,10 +1043,12 @@ fn get_model_data(diameter: u32) -> Vec<u8> {
                 let y_dist = radius.abs_diff(y);
                 let z_dist = radius.abs_diff(z);
                 if (x_dist * x_dist + y_dist * y_dist + z_dist * z_dist) <= (radius * radius) {
-                    let begin = z * diameter * diameter * bytes_per_texel
-                        + y * diameter * bytes_per_texel
-                        + x * bytes_per_texel;
+                    let begin = z * diameter * diameter * colors_per_texel
+                        + y * diameter * colors_per_texel
+                        + x * colors_per_texel;
                     let color = ((x + y + z) % 2) * 0xb8bb26;
+
+                    // we assume that we have 4 colors per texel
                     data[begin] = ((color & 0xFF0000) >> 16) as u8; // red;
                     data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // red;
                     data[begin + 2] = (color & 0x0000FF) as u8; // red;
@@ -1038,6 +1058,70 @@ fn get_model_data(diameter: u32) -> Vec<u8> {
         }
     }
     data
+}
+
+fn get_bulb_model(cube_side_length: u32, colors_per_texel: usize) -> Vec<u8> {
+    let cube_side_length = cube_side_length as usize;
+    let mut data =
+        vec![0; cube_side_length * cube_side_length * cube_side_length * colors_per_texel];
+    let max_mandel_distance = 1.25;
+    for z in 0..cube_side_length {
+        for y in 0..cube_side_length {
+            for x in 0..cube_side_length {
+                let maped_x = (x as f32 / cube_side_length as f32) * max_mandel_distance * 2.0
+                    - max_mandel_distance;
+                let maped_y = (y as f32 / cube_side_length as f32) * max_mandel_distance * 2.0
+                    - max_mandel_distance;
+                let mapped_z = (z as f32 / cube_side_length as f32) * max_mandel_distance * 2.0
+                    - max_mandel_distance;
+                if point_is_part_of_mandelbulb(vec3(maped_x, maped_y, mapped_z)) {
+                    let begin = z * cube_side_length * cube_side_length * colors_per_texel
+                        + y * cube_side_length * colors_per_texel
+                        + x * colors_per_texel;
+                    let color = ((x + y + z) % 2) * 0xb8bb26;
+
+                    // we assume that we have 4 colors per texel
+                    data[begin] = ((color & 0xFF0000) >> 16) as u8; // red;
+                    data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // green;
+                    data[begin + 2] = (color & 0x0000FF) as u8; // blue;
+                    data[begin + 3] = 0xFF; // alpha
+                }
+            }
+        }
+    }
+
+    data
+}
+
+fn point_is_part_of_mandelbulb(point: Vec3) -> bool {
+    let mut result = point.clone();
+
+    let max_iters = 4;
+    for _ in 0..max_iters {
+        // I have no idea how this works
+        let (x, y, z) = (result.x, result.y, result.z);
+        let (x2, y2, z2) = (x * x, y * y, z * z);
+        let (x4, y4, z4) = (x2 * x2, y2 * y2, z2 * z2);
+
+        let k3 = x2 + z2;
+        let k2 = 1.0 / (k3 * k3 * k3 * k3 * k3 * k3 * k3).sqrt();
+        let k1 = x4 + y4 + z4 - 6.0 * y2 * z2 - 6.0 * x2 * y2 + 2.0 * z2 * x2;
+        let k4 = x2 - y2 + z2;
+        result.x = 64.0 * x * y * z * (x2 - z2) * k4 * (x4 - 6.0 * x2 * z2 + z4) * k1 * k2;
+        result.y = -16.0 * y2 * k3 * k4 * k4 + k1 * k1;
+        result.z = -8.0
+            * y
+            * k4
+            * (x4 * x4 - 28.0 * x4 * x2 * z2 + 70.0 * x4 * z4 - 28.0 * x2 * z2 * z4 + z4 * z4)
+            * k1
+            * k2;
+
+        result += point;
+        if result.length_squared() > 256.0 {
+            return false;
+        }
+    }
+    true
 }
 
 mod cs {
