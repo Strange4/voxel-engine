@@ -1,4 +1,5 @@
 use std::f32;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,6 +42,8 @@ use winit::window::Window;
 
 use vulkano::sync::{self, GpuFuture, PipelineStage};
 
+use crate::voxel_data::XYZIVoxelData;
+use crate::voxel_loader::VoxFile;
 use crate::vulkan::starter::{
     get_device_and_queue, get_headless_device_and_queue, get_headless_instance,
     get_physical_device_and_family_index, get_physical_device_and_family_index_for_surface,
@@ -978,9 +981,11 @@ fn create_model_and_fill(
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     queue: Arc<Queue>,
 ) -> Arc<Image> {
-    let cube_side_length = 100;
-    let colors_per_texel = 4;
-    let extent = [cube_side_length; 3];
+    let vox_file = VoxFile::load_vox_file(Path::new("models/monu1.vox")).unwrap();
+    let voxel_data = XYZIVoxelData::from_vox_file(vox_file).unwrap();
+    let size = voxel_data.size();
+    // let cube_side_length = 100;
+    let extent = [size.x, size.y, size.z];
     let image = Image::new(
         allocator.clone(),
         ImageCreateInfo {
@@ -1005,7 +1010,7 @@ fn create_model_and_fill(
                 | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
             ..Default::default()
         },
-        get_bulb_model(cube_side_length, colors_per_texel),
+        voxel_data.as_rgba_bytes(),
     )
     .expect("Couldn't create buffer");
 
@@ -1032,9 +1037,10 @@ fn create_model_and_fill(
     image
 }
 
-fn get_sphere_model(cube_side_length: u32, colors_per_texel: usize) -> Vec<u8> {
+fn get_sphere_model(cube_side_length: u32) -> Vec<u8> {
     let diameter = cube_side_length as usize;
-    let mut data = vec![0; diameter * diameter * diameter * colors_per_texel];
+    let bytes_per_voxel = 4;
+    let mut data = vec![0; diameter * diameter * diameter * bytes_per_voxel];
     let radius = diameter / 2;
     for z in 0..diameter {
         for y in 0..diameter {
@@ -1043,15 +1049,14 @@ fn get_sphere_model(cube_side_length: u32, colors_per_texel: usize) -> Vec<u8> {
                 let y_dist = radius.abs_diff(y);
                 let z_dist = radius.abs_diff(z);
                 if (x_dist * x_dist + y_dist * y_dist + z_dist * z_dist) <= (radius * radius) {
-                    let begin = z * diameter * diameter * colors_per_texel
-                        + y * diameter * colors_per_texel
-                        + x * colors_per_texel;
+                    let begin = z * diameter * diameter * bytes_per_voxel
+                        + y * diameter * bytes_per_voxel
+                        + x * bytes_per_voxel;
                     let color = ((x + y + z) % 2) * 0xb8bb26;
 
-                    // we assume that we have 4 colors per texel
                     data[begin] = ((color & 0xFF0000) >> 16) as u8; // red;
-                    data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // red;
-                    data[begin + 2] = (color & 0x0000FF) as u8; // red;
+                    data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // blue;
+                    data[begin + 2] = (color & 0x0000FF) as u8; // green;
                     data[begin + 3] = 0xFF; // alpha
                 }
             }
@@ -1060,10 +1065,11 @@ fn get_sphere_model(cube_side_length: u32, colors_per_texel: usize) -> Vec<u8> {
     data
 }
 
-fn get_bulb_model(cube_side_length: u32, colors_per_texel: usize) -> Vec<u8> {
+fn get_bulb_model(cube_side_length: u32) -> Vec<u8> {
     let cube_side_length = cube_side_length as usize;
+    let bytes_per_voxel = 4;
     let mut data =
-        vec![0; cube_side_length * cube_side_length * cube_side_length * colors_per_texel];
+        vec![0; cube_side_length * cube_side_length * cube_side_length * bytes_per_voxel];
     let max_mandel_distance = 1.25;
     for z in 0..cube_side_length {
         for y in 0..cube_side_length {
@@ -1075,12 +1081,11 @@ fn get_bulb_model(cube_side_length: u32, colors_per_texel: usize) -> Vec<u8> {
                 let mapped_z = (z as f32 / cube_side_length as f32) * max_mandel_distance * 2.0
                     - max_mandel_distance;
                 if point_is_part_of_mandelbulb(vec3(maped_x, maped_y, mapped_z)) {
-                    let begin = z * cube_side_length * cube_side_length * colors_per_texel
-                        + y * cube_side_length * colors_per_texel
-                        + x * colors_per_texel;
+                    let begin = z * cube_side_length * cube_side_length * bytes_per_voxel
+                        + y * cube_side_length * bytes_per_voxel
+                        + x * bytes_per_voxel;
                     let color = ((x + y + z) % 2) * 0xb8bb26;
 
-                    // we assume that we have 4 colors per texel
                     data[begin] = ((color & 0xFF0000) >> 16) as u8; // red;
                     data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // green;
                     data[begin + 2] = (color & 0x0000FF) as u8; // blue;

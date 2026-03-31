@@ -1,15 +1,5 @@
 # TODO
 
-### Generate different models to visualize
-
-- Fractals 👍👍
-  - https://towardsdatascience.com/creating-fractals-in-python-a502e5fc2094/
-  - https://natureofcode.com/fractals/
-  - https://www.skytopia.com/project/fractal/mandelbulb.html
-  - https://iquilezles.org/articles/mandelbulb/
-
-I think generating the mandelbulb would be very cool. I would have somehting complicated to render and then compare that to when I optimize the ray tracer with less data to send.
-
 ### Load MagicaVoxel files
 
 ### use sparse voxel octrees in traversal and storage
@@ -107,6 +97,8 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+[x] Mandelbulb model for having different benchmarks later.
+
 [x] Headless rendering that allows benchmarking.
 
 [x] Reduce as much as possible the time it takes to render the simple example
@@ -121,3 +113,15 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 # Inspirations
 
 - [Xima](https://www.youtube.com/@xima1)
+
+# References
+
+- [Vox models and file format](https://github.com/ephtracy/voxel-model/tree/master)
+- [More vox models](https://paulbourke.net/dataformats/vox/models/)
+- [Vox file structure](https://astrorenales.github.io/vox-viewer/)
+- [Voxel viewer](https://florianfe.github.io/vox-viewer/demo/)
+
+- Fractals
+  - https://natureofcode.com/fractals/
+  - https://www.skytopia.com/project/fractal/mandelbulb.html
+  - https://iquilezles.org/articles/mandelbulb/
