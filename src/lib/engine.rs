@@ -549,7 +549,7 @@ fn create_engine_parts(
 ) -> EngineParts {
     let camera_y_radians = f32::consts::FRAC_PI_2;
     let camera_x_radians = -f32::consts::FRAC_PI_2;
-    let camera_radius = 1000.0;
+    let camera_radius = 100.0;
     let push_contants = compute_ray_dependencies(
         &output_image_size,
         camera_y_radians,
@@ -649,6 +649,7 @@ fn compute_ray_dependencies(
 ) -> PushConstants {
     const VIEWPORT_HEIGHT: f32 = 100.0;
     const UP_VECTOR: Vec3 = vec3(0.0, -1.0, 0.0);
+    const FOCAL_DISTANCE: f32 = 30.0;
     let image_width = image_size[0] as f32;
     let image_height = image_size[1] as f32;
     let sin = camera_y_radians.sin();
@@ -669,7 +670,9 @@ fn compute_ray_dependencies(
     let pixel_delta_right = viewport_right_vector / image_width;
     let pixel_delta_down = viewport_down_vector / image_height;
 
-    let viepwort_upper_left = -viewport_down_vector * 0.5 - viewport_right_vector * 0.5;
+    let viepwort_upper_left = (-viewport_down_vector * 0.5 - viewport_right_vector * 0.5)
+        + camera_center
+        + camera_relative_forward * FOCAL_DISTANCE;
     let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
 
     PushConstants {
@@ -981,11 +984,10 @@ fn create_model_and_fill(
     command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
     queue: Arc<Queue>,
 ) -> Arc<Image> {
-    let vox_file = VoxFile::load_vox_file(Path::new("models/monu1.vox")).unwrap();
+    let vox_file = VoxFile::load_vox_file(Path::new("models/#red_booth_light_01.vox")).unwrap();
     let voxel_data = XYZIVoxelData::from_vox_file(vox_file).unwrap();
     let size = voxel_data.size();
-    // let cube_side_length = 100;
-    let extent = [size.x, size.y, size.z];
+    let extent = [size.x, size.z, size.y];
     let image = Image::new(
         allocator.clone(),
         ImageCreateInfo {

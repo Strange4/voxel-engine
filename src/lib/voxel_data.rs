@@ -1,8 +1,6 @@
-use glam::{U8Vec3, UVec3, Vec3, u8vec3, uvec3, vec3};
+use glam::{UVec3, uvec3};
 
-use crate::voxel_loader::{
-    RGBAChunk, SizeChunk, TransformChunkError, VoxFile, XYZIChunk, XYZIVoxel,
-};
+use crate::voxel_loader::{DEFAULT_PALETTE, RGBAChunk, SizeChunk, VoxFile, XYZIChunk, XYZIVoxel};
 
 pub struct XYZIVoxelData {
     // Size of the entire voxel model, might not reflect the exact boundary box of the voxels
@@ -58,16 +56,20 @@ impl XYZIVoxelData {
             }
         };
 
-        let rgba_chunk: RGBAChunk = main_chunk
-            .find_child("RGBA")
-            .ok_or(VoxelDataError::ChunkNotFound("RGBA".to_string()))?
-            .try_into()
-            .map_err(|e| VoxelDataError::TransformChunkError(format!("{e:?}")))?;
+        let color_palette = if let Some(rgba_chunk) = main_chunk.find_child("RGBA") {
+            let chunk: RGBAChunk = rgba_chunk
+                .try_into()
+                .map_err(|e| VoxelDataError::TransformChunkError(format!("{e:?}")))?;
+
+            chunk.get_palette()
+        } else {
+            DEFAULT_PALETTE
+        };
 
         Ok(Self {
             size: uvec3(size_chunk.x(), size_chunk.y(), size_chunk.z()),
             data: xyzi_chunk.get_voxels(),
-            color_palette: rgba_chunk.get_palette(),
+            color_palette,
         })
     }
 
@@ -75,8 +77,8 @@ impl XYZIVoxelData {
         let bytes_per_voxel = 4;
         let (x_size, y_size, z_size) = (
             self.size.x as usize,
-            self.size.y as usize,
             self.size.z as usize,
+            self.size.y as usize,
         );
         let number_of_voxels = x_size * y_size * z_size;
         let mut bytes = vec![0; bytes_per_voxel * number_of_voxels];
@@ -89,11 +91,12 @@ impl XYZIVoxelData {
             let start_index = z * x_size * y_size * bytes_per_voxel
                 + y * x_size * bytes_per_voxel
                 + x * bytes_per_voxel;
+
             let color = self.color_palette[voxel.i() as usize];
-            bytes[start_index] = ((color & 0xFF0000) >> 16) as u8; // red;
-            bytes[start_index + 1] = ((color & 0x00FF00) >> 8) as u8; // blue;
-            bytes[start_index + 2] = (color & 0x0000FF) as u8; // green;
-            bytes[start_index + 3] = 0xFF; // alpha
+            bytes[start_index] = ((color & 0xFF000000) >> 24) as u8; // red;
+            bytes[start_index + 1] = ((color & 0x00FF0000) >> 16) as u8; // blue;
+            bytes[start_index + 2] = ((color & 0xFF00) >> 8) as u8; // green;
+            bytes[start_index + 3] = (color & 0xFF) as u8; // alpha
         });
         bytes
     }

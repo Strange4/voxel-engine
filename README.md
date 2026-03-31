@@ -1,8 +1,15 @@
 # TODO
 
-### Make the camera movement smooth with fixed FOV
+### Add free camera checkbox
 
-(like a normal camera with the focal distance not always on the center but a fixed distance from the screen)
+### Add focal blur to the camera tracing
+
+### Make every constant value adjustable through the UI
+
+- Focal distance
+- Focal blurr
+- Color palette
+- Model selection
 
 ### use sparse voxel octrees in traversal and storage
 
@@ -99,6 +106,7 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+- [x] Make the camera movement smooth with fixed FOV
 - [x] Load magica voxel files ![cool monument bro](./assets/monument_first_load.mp4)
 - [x] Mandelbulb model for having different benchmarks later.
 - [x] Headless rendering that allows benchmarking.
