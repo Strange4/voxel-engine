@@ -1,6 +1,8 @@
 # TODO
 
-### Load MagicaVoxel files
+### Make the camera movement smooth with fixed FOV
+
+(like a normal camera with the focal distance not always on the center but a fixed distance from the screen)
 
 ### use sparse voxel octrees in traversal and storage
 
@@ -97,18 +99,14 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
-[x] Mandelbulb model for having different benchmarks later.
-
-[x] Headless rendering that allows benchmarking.
-
-[x] Reduce as much as possible the time it takes to render the simple example
-
-[x] Add a GUI to have real time performance on the screen
-
-[x] Make a moving camera
-![cool camera movement](./assets/cool_sphere_and_movement.mp4)
-
-[x] Create a 3D texture for tracing voxels
+- [x] Load magica voxel files ![cool monument bro](./assets/monument_first_load.mp4)
+- [x] Mandelbulb model for having different benchmarks later.
+- [x] Headless rendering that allows benchmarking.
+- [x] Reduce as much as possible the time it takes to render the simple example
+- [x] Add a GUI to have real time performance on the screen
+- [x] Make a moving camera
+      ![cool camera movement](./assets/cool_sphere_and_movement.mp4)
+- [x] Create a 3D texture for tracing voxels
 
 # Inspirations
 
