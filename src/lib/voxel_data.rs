@@ -82,6 +82,10 @@ impl XYZIVoxelData {
         let mut bytes = vec![0; bytes_per_voxel * number_of_voxels];
         self.data.iter().for_each(|voxel| {
             let (x, y, z) = (voxel.x() as usize, voxel.y() as usize, voxel.z() as usize);
+            // The xyz coordinates of the .vox format aren't the same as vulkan's normalized device coordinates
+            // The z is up the screen in .vox instead towards inward like in NDC
+            let (y, z) = (y_size - z - 1, y);
+
             let start_index = z * x_size * y_size * bytes_per_voxel
                 + y * x_size * bytes_per_voxel
                 + x * bytes_per_voxel;
