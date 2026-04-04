@@ -42,6 +42,7 @@ use winit::window::Window;
 
 use vulkano::sync::{self, GpuFuture, PipelineStage};
 
+use crate::camera::Camera;
 use crate::voxel_data::XYZIVoxelData;
 use crate::voxel_loader::VoxFile;
 use crate::vulkan::starter::{
@@ -55,9 +56,8 @@ type FenceFuture = FenceSignalFuture<CommandBufferExecFuture<Box<dyn GpuFuture>>
 
 const MAX_TIMESTAMP_QUERIES_PER_IMAGE: u32 = 3;
 
-pub struct BetterEngine<T> {
+pub struct Engine<T> {
     engine_parts: EngineParts,
-
     renderer: T,
 }
 
@@ -80,10 +80,9 @@ pub struct WindowedEngine {
 
     gui: Gui,
 }
+
 pub struct EngineParts {
-    camera_x_radians: f32, // the angle off of the x vector
-    camera_y_radians: f32, // the angle off of the z vector
-    camera_radius: f32,
+    camera: Camera,
 
     // stuff that we want to precompute
     push_contants: PushConstants,
@@ -126,40 +125,17 @@ struct PushConstants {
     camera_z: f32,
 }
 
-impl<T> BetterEngine<T> {
-    pub fn move_horizontally(&mut self, amount_radians: f32) {
-        self.engine_parts.camera_x_radians += amount_radians;
+impl<T> Engine<T> {
+    pub fn set_camera(&mut self, camera: Camera) {
+        self.engine_parts.camera = camera;
         self.engine_parts.push_contants = compute_ray_dependencies(
             &self.engine_parts.last_image_size,
-            self.engine_parts.camera_y_radians,
-            self.engine_parts.camera_x_radians,
-            self.engine_parts.camera_radius,
-        );
-    }
-
-    pub fn move_vertically(&mut self, amount_radians: f32) {
-        self.engine_parts.camera_y_radians = (self.engine_parts.camera_y_radians + amount_radians)
-            .clamp(0.001, f32::consts::PI - 0.001);
-        self.engine_parts.push_contants = compute_ray_dependencies(
-            &self.engine_parts.last_image_size,
-            self.engine_parts.camera_y_radians,
-            self.engine_parts.camera_x_radians,
-            self.engine_parts.camera_radius,
-        );
-    }
-
-    pub fn move_forward(&mut self, amount: f32) {
-        self.engine_parts.camera_radius += amount;
-        self.engine_parts.push_contants = compute_ray_dependencies(
-            &self.engine_parts.last_image_size,
-            self.engine_parts.camera_y_radians,
-            self.engine_parts.camera_x_radians,
-            self.engine_parts.camera_radius,
+            &self.engine_parts.camera,
         );
     }
 }
 
-impl BetterEngine<WindowedEngine> {
+impl Engine<WindowedEngine> {
     pub fn new(window: Arc<Window>, event_loop: &ActiveEventLoop) -> Self {
         let (renderer, engine_parts) = WindowedEngine::new_with_parts(window, event_loop);
 
@@ -180,7 +156,7 @@ impl BetterEngine<WindowedEngine> {
     }
 }
 
-impl BetterEngine<HeadlessEngine> {
+impl Engine<HeadlessEngine> {
     pub fn new(output_image_size: [u32; 2]) -> Self {
         let (renderer, engine_parts) = HeadlessEngine::new_with_parts(output_image_size);
         Self {
@@ -331,6 +307,7 @@ impl WindowedEngine {
             images_and_views[0].0.format(), // give the same format as the swapchain format
             GuiConfig {
                 is_overlay: true,
+                allow_srgb_render_target: true,
                 ..Default::default()
             },
         );
@@ -509,12 +486,8 @@ impl WindowedEngine {
         self.descriptor_sets = descriptor_sets;
         engine_parts.last_image_size = [new_dimensions.width, new_dimensions.height];
 
-        engine_parts.push_contants = compute_ray_dependencies(
-            &engine_parts.last_image_size,
-            engine_parts.camera_y_radians,
-            engine_parts.camera_x_radians,
-            engine_parts.camera_radius,
-        );
+        engine_parts.push_contants =
+            compute_ray_dependencies(&engine_parts.last_image_size, &engine_parts.camera);
     }
 
     fn acquire_next_swapchain_image(&mut self) -> Option<(u32, SwapchainAcquireFuture)> {
@@ -547,15 +520,8 @@ fn create_engine_parts(
     queue: Arc<Queue>,
     query_count: u32,
 ) -> EngineParts {
-    let camera_y_radians = f32::consts::FRAC_PI_2;
-    let camera_x_radians = -f32::consts::FRAC_PI_2;
-    let camera_radius = 100.0;
-    let push_contants = compute_ray_dependencies(
-        &output_image_size,
-        camera_y_radians,
-        camera_x_radians,
-        camera_radius,
-    );
+    let camera = Camera::default();
+    let push_contants = compute_ray_dependencies(&output_image_size, &camera);
 
     let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
         device.clone(),
@@ -574,9 +540,7 @@ fn create_engine_parts(
     .unwrap();
 
     EngineParts {
-        camera_x_radians,
-        camera_y_radians,
-        camera_radius,
+        camera,
         push_contants,
         device,
         queue,
@@ -641,27 +605,20 @@ fn get_query_timings(
     Some(results)
 }
 
-fn compute_ray_dependencies(
-    image_size: &[u32; 2],
-    camera_y_radians: f32,
-    camera_x_radians: f32,
-    camera_radius: f32,
-) -> PushConstants {
+fn compute_ray_dependencies(image_size: &[u32; 2], camera: &Camera) -> PushConstants {
     const VIEWPORT_HEIGHT: f32 = 100.0;
-    const UP_VECTOR: Vec3 = vec3(0.0, -1.0, 0.0);
+    let up_vector: Vec3 = camera.up;
     const FOCAL_DISTANCE: f32 = 30.0;
     let image_width = image_size[0] as f32;
     let image_height = image_size[1] as f32;
-    let sin = camera_y_radians.sin();
-    let x = camera_radius * camera_x_radians.cos() * sin;
-    let y = camera_radius * camera_y_radians.cos();
-    let z = camera_radius * camera_x_radians.sin() * sin;
-    let camera_center = vec3(x, y, z);
+
+    let camera_center = camera.position;
 
     let aspect_ratio = image_width / image_height;
     let viewport_width = aspect_ratio * VIEWPORT_HEIGHT;
-    let camera_relative_forward = (-camera_center).normalize();
-    let camera_relative_right = camera_relative_forward.cross(UP_VECTOR).normalize();
+    let camera_relative_forward = camera.direction.normalize();
+
+    let camera_relative_right = camera_relative_forward.cross(up_vector).normalize();
     let camera_relative_down = camera_relative_forward.cross(camera_relative_right);
 
     let viewport_right_vector = viewport_width * camera_relative_right;
@@ -670,9 +627,10 @@ fn compute_ray_dependencies(
     let pixel_delta_right = viewport_right_vector / image_width;
     let pixel_delta_down = viewport_down_vector / image_height;
 
-    let viepwort_upper_left = (-viewport_down_vector * 0.5 - viewport_right_vector * 0.5)
+    let viepwort_upper_left = 0.5 * (-viewport_down_vector - viewport_right_vector)
         + camera_center
         + camera_relative_forward * FOCAL_DISTANCE;
+
     let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
 
     PushConstants {

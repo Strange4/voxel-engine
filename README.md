@@ -147,3 +147,8 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 - 2: run `/opt/nvidia/nsight-graphics-for-linux/nsight-graphics-for-linux-2025.4.1.0/host/linux-desktop-nomad-x64/nv-aftermath-control --debuginfo true --shader-error-reporting true --mode Global`. This will set the right settings
 - 3: open the application and recreate the settings
 - 4: click on the prompt that appears to open the crash dump in nsight graphics
+
+### Use renderdoc
+
+- 1. Make sure you run with the command environment variable set to `WAYLAND_DISPLAY= XDG_SESSION_TYPE=x11 ./qrenderdoc`
+- 2. Run and use renderdoc

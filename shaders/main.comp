@@ -84,7 +84,7 @@ vec4 rayColor(Ray ray) {
     vec2 tMinMax = intersection(ray, aabb);
     float tMin = tMinMax.x;
     float tMax = tMinMax.y;
-    if (tMin >= tMax) {
+    if (tMin >= tMax || tMax < 0) {
         return vec4(vec3(0.156862745).xyz, 1);
     }
     return traverse_and_get_color(ray, tMinMax, aabb);
