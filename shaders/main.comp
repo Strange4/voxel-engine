@@ -52,6 +52,7 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
     vec3 planeStep = sign(ray.direction);
     vec3 tDelta = abs(1 / ray.direction);
     uint steps = 0;
+    uint max_steps = uint(aabb.size.x + aabb.size.y + aabb.size.z);
     vec3 maxPoint = aabb.minPos + aabb.size;
 
     // while the current position falls within the bounding box
@@ -61,11 +62,16 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
             return voxelValue;
         }
         steps++;
+
+        if (steps >= max_steps) {
+            return vec4(1, 0, 0, 1);
+        }
+
         int axis = (t.x < t.y) ? ((t.x < t.z) ? 0 : 2) : ((t.y < t.z) ? 1 : 2);
         currentPoint[axis] += planeStep[axis];
         t[axis] += tDelta[axis];
     }
-
+    // return vec4(vec3(0.156862745).xyz, 1);
     float maxSteps = float(aabb.size.x + aabb.size.y + aabb.size.z);
     float stepRatio = float(steps) / maxSteps;
     return vec4(vec3(stepRatio).xyz, 1);

@@ -67,7 +67,8 @@ impl XYZIVoxelData {
         };
 
         Ok(Self {
-            size: uvec3(size_chunk.x(), size_chunk.y(), size_chunk.z()),
+            // the Y and Z axis are inversed from the .vox file format and the vulkan coordinate system
+            size: uvec3(size_chunk.x(), size_chunk.z(), size_chunk.y()),
             data: xyzi_chunk.get_voxels(),
             color_palette,
         })
@@ -77,9 +78,10 @@ impl XYZIVoxelData {
         let bytes_per_voxel = 4;
         let (x_size, y_size, z_size) = (
             self.size.x as usize,
-            self.size.z as usize,
             self.size.y as usize,
+            self.size.z as usize,
         );
+
         let number_of_voxels = x_size * y_size * z_size;
         let mut bytes = vec![0; bytes_per_voxel * number_of_voxels];
         self.data.iter().for_each(|voxel| {

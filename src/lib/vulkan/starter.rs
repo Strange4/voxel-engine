@@ -118,7 +118,9 @@ pub fn get_physical_device_and_family_index_for_surface(
         .unwrap()
 }
 
-pub fn get_physical_device_and_family_index(instance: &Arc<Instance>) -> (Arc<PhysicalDevice>, u32) {
+pub fn get_physical_device_and_family_index(
+    instance: &Arc<Instance>,
+) -> (Arc<PhysicalDevice>, u32) {
     instance
         .enumerate_physical_devices()
         .unwrap()
@@ -168,7 +170,10 @@ pub fn get_device_and_queue(
     (device, queue)
 }
 
-pub fn get_headless_device_and_queue(physical_device: Arc<PhysicalDevice>, queue_family_index: u32) -> (Arc<Device>, Arc<Queue>) {
+pub fn get_headless_device_and_queue(
+    physical_device: Arc<PhysicalDevice>,
+    queue_family_index: u32,
+) -> (Arc<Device>, Arc<Queue>) {
     let (device, mut queues) = Device::new(
         physical_device,
         DeviceCreateInfo {

@@ -7,9 +7,13 @@
 ### Make every constant value adjustable through the UI
 
 - Focal distance
-- Focal blurr
+- Focal blur
 - Color palette
 - Model selection
+- Traversal depth visualization checkbox
+- Rendering size in pixels (like 1920x1080)
+
+### Load multiple models from the same .vox file
 
 ### use sparse voxel octrees in traversal and storage
 
@@ -106,6 +110,7 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+- [x] Fix infinite loop in shader: Nvidia nsight graphics says that the device _hung_ while executing which I think its an infinite loop. ![nsight-graphics-hung](./assets/image.png)
 - [x] Make the camera movement smooth with fixed FOV
 - [x] Load magica voxel files ![cool monument bro](./assets/monument_first_load.mp4)
 - [x] Mandelbulb model for having different benchmarks later.
@@ -131,3 +136,14 @@ Read up on previous question. The layout of a descriptor set is an array of all 
   - https://natureofcode.com/fractals/
   - https://www.skytopia.com/project/fractal/mandelbulb.html
   - https://iquilezles.org/articles/mandelbulb/
+
+# How to?
+
+### Setup Nvidia nsight aftermath for crash reports.
+
+- 00: make sure that you have the [nvidia drivers](https://wiki.debian.org/NvidiaGraphicsDrivers) installed.
+- 0: make sure that your shader debug info is included (in Cargo.toml)
+- 1: run `/opt/nvidia/nsight-graphics-for-linux/nsight-graphics-for-linux-2025.4.1.0/host/linux-desktop-nomad-x64/nv-aftermath-monitor --crashdump-dir ~/ --debuginfo-dir ~/ --prompt-on-crash true`. This will be run in the background and have it monitor for crashes.
+- 2: run `/opt/nvidia/nsight-graphics-for-linux/nsight-graphics-for-linux-2025.4.1.0/host/linux-desktop-nomad-x64/nv-aftermath-control --debuginfo true --shader-error-reporting true --mode Global`. This will set the right settings
+- 3: open the application and recreate the settings
+- 4: click on the prompt that appears to open the crash dump in nsight graphics
