@@ -19,8 +19,6 @@ layout(std140, push_constant) uniform PushConstants {
     float camera_z;
 } push_constants;
 
-const float viewportHeight = 30;
-
 vec4 getVoxelAtCoord(vec3 coord, AABB aabb) {
     ivec3 voxelCoord = ivec3(coord - aabb.minPos);
     return imageLoad(model, voxelCoord);
@@ -37,11 +35,24 @@ vec2 intersection(Ray ray, AABB aabb) {
     return vec2(t_near, t_far);
 }
 
+bool pointIsInsideBox(vec3 point, AABB box) {
+    return all(greaterThanEqual(point, box.minPos)) && all(lessThanEqual(point, box.minPos + box.size));
+}
+
 vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
     float tMin = tMinMax.x;
     float tMax = tMinMax.y;
-    vec3 startPoint = ray.origin + tMin * ray.direction;
-    vec3 currentPoint = clamp(floor(ray.origin + tMin * ray.direction), aabb.minPos, aabb.minPos + aabb.size - 1);
+    vec3 currentPoint;
+
+    // the point is known to be "inside the box" if the tMin is negative
+    // This is because if a ray is inside a box, its minimum position is behind it
+    // bool isInside = pointIsInsideBox(ray.origin, aabb);
+    bool isInside = tMin <= 0;
+    if (isInside) {
+        currentPoint = clamp(floor(ray.origin), aabb.minPos, aabb.minPos + aabb.size - 1);
+    } else {
+        currentPoint = clamp(floor(ray.origin + tMin * ray.direction), aabb.minPos, aabb.minPos + aabb.size - 1);
+    }
     vec3 endPoint = ray.origin + ray.direction * tMax;
     // this will select the "next" plane that the ray will intersect with.
     // See https://www.youtube.com/watch?v=ztkh1r1ioZo for more info
