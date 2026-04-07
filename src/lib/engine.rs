@@ -3,7 +3,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use egui::Align2;
 use egui_winit_vulkano::{Gui, GuiConfig};
 use glam::{Vec3, vec3};
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
@@ -147,12 +146,32 @@ impl Engine<WindowedEngine> {
 
     pub fn draw(&mut self, window: &Arc<Window>, window_resized: bool) {
         self.renderer
-            .draw(window, window_resized, &mut self.engine_parts);
+            .draw::<fn(&mut Gui)>(window, window_resized, &mut self.engine_parts, None);
+    }
+
+    pub fn draw_with_gui<RenderGuiFn>(
+        &mut self,
+        window: &Arc<Window>,
+        window_resized: bool,
+        gui_draw_fn: RenderGuiFn,
+    ) where
+        RenderGuiFn: FnOnce(&mut Gui),
+    {
+        self.renderer.draw(
+            window,
+            window_resized,
+            &mut self.engine_parts,
+            Some(gui_draw_fn),
+        );
     }
 
     /// See docs for pass_event_to_gui
     pub fn handle_event(&mut self, event: &WindowEvent) -> bool {
         self.renderer.pass_event_to_gui(event)
+    }
+
+    pub fn image_draw_time_ns(&self) -> f64 {
+        self.renderer.compute_time + self.renderer.copy_time
     }
 }
 
@@ -330,17 +349,27 @@ impl WindowedEngine {
             output_images,
             present_images_and_views: images_and_views,
             descriptor_sets,
-            gui,
+            gui: gui,
         };
 
         (renderer, engine_parts)
     }
 
-    fn draw(&mut self, window: &Arc<Window>, window_resized: bool, engine_parts: &mut EngineParts) {
+    fn draw<RenderFn>(
+        &mut self,
+        window: &Arc<Window>,
+        window_resized: bool,
+        engine_parts: &mut EngineParts,
+        gui_draw_fn: Option<RenderFn>,
+    ) where
+        RenderFn: FnOnce(&mut Gui),
+    {
         self.handle_recreate_swapchain(window, window_resized, engine_parts);
 
         // draw the gui before we have to wait for the fence. We will have to wait for the fence less
-        draw_gui(&mut self.gui, self.compute_time, self.copy_time);
+        if let Some(render_fn) = gui_draw_fn {
+            self.gui.immediate_ui(render_fn);
+        }
 
         let maybe_swapchain = self.acquire_next_swapchain_image();
         if maybe_swapchain.is_none() {
@@ -606,30 +635,30 @@ fn get_query_timings(
 }
 
 fn compute_ray_dependencies(image_size: &[u32; 2], camera: &Camera) -> PushConstants {
-    const VIEWPORT_HEIGHT: f32 = 100.0;
     let up_vector: Vec3 = camera.up;
-    const FOCAL_DISTANCE: f32 = 30.0;
     let image_width = image_size[0] as f32;
     let image_height = image_size[1] as f32;
+    let aspect_ratio = image_width / image_height;
 
     let camera_center = camera.position;
 
-    let aspect_ratio = image_width / image_height;
-    let viewport_width = aspect_ratio * VIEWPORT_HEIGHT;
+    let viewport_height =
+        2.0 * camera.focal_distance * (camera.field_of_view.to_radians() / 2.0).tan();
+    let viewport_width = aspect_ratio * viewport_height;
     let camera_relative_forward = camera.direction.normalize();
 
     let camera_relative_right = camera_relative_forward.cross(up_vector).normalize();
     let camera_relative_down = camera_relative_forward.cross(camera_relative_right);
 
     let viewport_right_vector = viewport_width * camera_relative_right;
-    let viewport_down_vector = VIEWPORT_HEIGHT * camera_relative_down;
+    let viewport_down_vector = viewport_height * camera_relative_down;
 
     let pixel_delta_right = viewport_right_vector / image_width;
     let pixel_delta_down = viewport_down_vector / image_height;
 
     let viepwort_upper_left = 0.5 * (-viewport_down_vector - viewport_right_vector)
         + camera_center
-        + camera_relative_forward * FOCAL_DISTANCE;
+        + camera_relative_forward * camera.focal_distance;
 
     let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
 
@@ -641,22 +670,6 @@ fn compute_ray_dependencies(image_size: &[u32; 2], camera: &Camera) -> PushConst
         camera_y: camera_center.y,
         camera_z: camera_center.z,
     }
-}
-
-fn draw_gui(gui: &mut Gui, compute_time: f64, copy_time: f64) {
-    let compute_time_ms = compute_time / 1_000_000.0;
-    let copy_time_ms = copy_time / 1_000_000.0;
-    gui.immediate_ui(|gui| {
-        let ctx = gui.context();
-
-        egui::Window::new("Specs")
-            .anchor(Align2::LEFT_TOP, [5.0, 5.0])
-            .auto_sized()
-            .show(&ctx, |ui| {
-                ui.label(format!("Compute time: {compute_time_ms:.3}ms"));
-                ui.label(format!("Copy time: {copy_time_ms:.3}ms"));
-            });
-    });
 }
 
 fn get_images_and_views(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageView>)> {

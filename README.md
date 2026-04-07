@@ -1,6 +1,6 @@
 # TODO
 
-### Add free camera checkbox
+### Fix camera in spherical coordinates
 
 ### Add focal blur to the camera tracing
 
@@ -110,6 +110,7 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+- [x] Add free camera checkbox
 - [x] Fix bug when looking away from the origin from inside the cube
 - [x] Fix infinite loop in shader: Nvidia nsight graphics says that the device _hung_ while executing which I think its an infinite loop. ![nsight-graphics-hung](./assets/image.png)
 - [x] Make the camera movement smooth with fixed FOV

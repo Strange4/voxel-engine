@@ -8,6 +8,7 @@ pub struct Camera {
     pub position: Vec3,
     pub direction: Vec3,
     pub up: Vec3,
+    pub field_of_view: f32,
     pub focal_distance: f32,
     pub aperture: f32,
 }
@@ -18,7 +19,8 @@ impl Camera {
             position: Vec3::new(x, y, z),
             direction: (Vec3::ZERO - Vec3::new(x, y, z)).normalize(),
             up: Vec3::new(0.0, -1.0, 0.0),
-            focal_distance: 30.0,
+            field_of_view: 90.0,
+            focal_distance: 1.0,
             aperture: 0.0,
         }
     }
@@ -49,6 +51,10 @@ impl Camera {
 
     pub fn move_up(&mut self, amount: f32) {
         self.position += self.up * amount;
+    }
+
+    pub fn look_at(&mut self, position: Vec3) {
+        self.direction = (position - self.position).normalize();
     }
 
     pub fn move_spherically_while_looking_at(
