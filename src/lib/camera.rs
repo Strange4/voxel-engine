@@ -63,27 +63,27 @@ impl Camera {
         vertical_amount: f32,
         horizontal_amount: f32,
     ) {
-        let mut direction = point - self.position;
-        let distance = direction.length();
-        direction = direction.normalize();
-        let mut horizontal_angle = (direction.x * direction.x + direction.z * direction.z)
+        // Transform to spherical coordinates
+        let centered_position = self.position - point;
+        let distance = centered_position.length();
+        let mut vertical_angle = (centered_position.x * centered_position.x
+            + centered_position.z * centered_position.z)
             .sqrt()
-            .atan2(-direction.y);
-        let mut vertical_angle = direction.z.atan2(direction.x);
-        horizontal_angle += horizontal_amount;
-        vertical_angle += vertical_amount;
-        vertical_angle = vertical_angle.clamp(
-            -std::f32::consts::FRAC_PI_2 - 0.1,
-            std::f32::consts::FRAC_PI_2 - 0.1,
-        );
+            .atan2(-centered_position.y);
+        let mut horizontal_angle = centered_position.z.atan2(centered_position.x);
 
+        // add the angles
+        vertical_angle += vertical_amount;
+        horizontal_angle += horizontal_amount;
+
+        // transform back into xyz
         self.position = point
-            - Vec3::new(
-                horizontal_angle.sin() * vertical_angle.cos(),
-                -vertical_angle.cos(),
-                horizontal_angle.sin() * vertical_angle.sin(),
+            + Vec3::new(
+                vertical_angle.sin() * horizontal_angle.cos(),
+                -(vertical_angle.cos()),
+                vertical_angle.sin() * horizontal_angle.sin(),
             ) * distance;
 
-        self.direction = direction;
+        self.direction = (point - self.position).normalize();
     }
 }

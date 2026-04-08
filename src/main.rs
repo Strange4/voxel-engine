@@ -1,6 +1,3 @@
-use std::path::Path;
-
-use voxel_engine::voxel_loader::VoxFile;
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use crate::app::App;

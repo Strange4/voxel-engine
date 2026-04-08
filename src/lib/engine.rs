@@ -1,7 +1,7 @@
 use std::f32;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use egui_winit_vulkano::{Gui, GuiConfig};
 use glam::{Vec3, vec3};
@@ -50,7 +50,7 @@ use crate::vulkan::starter::{
     get_swapchain, get_windowed_instance,
 };
 
-type SwapchainFenceFuture = FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>;
+type SwapchainFenceFuture = Arc<FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>>;
 type FenceFuture = FenceSignalFuture<CommandBufferExecFuture<Box<dyn GpuFuture>>>;
 
 const MAX_TIMESTAMP_QUERIES_PER_IMAGE: u32 = 3;
@@ -384,7 +384,7 @@ impl WindowedEngine {
             image_fence.wait(None).unwrap();
         }
 
-        let previous_future = match self.fences.remove(self.previous_fence) {
+        let previous_future = match self.fences[self.previous_fence].clone() {
             None => {
                 let mut now = sync::now(engine_parts.device.clone());
                 now.cleanup_finished();
@@ -437,15 +437,14 @@ impl WindowedEngine {
             .then_signal_fence_and_flush();
 
         let future = match execution.map_err(Validated::unwrap) {
-            Ok(future) => Some(future),
+            Ok(future) => Some(Arc::new(future)),
             Err(VulkanError::OutOfDate) => {
                 self.recreate_swapchain = true;
                 None
             }
             Err(err) => panic!("{err}"),
         };
-        self.fences.insert(swap_image_index as usize, future);
-        // self.fences[swap_image_index as usize] = future;
+        self.fences[swap_image_index as usize] = future;
 
         self.previous_fence = swap_image_index as usize;
     }
@@ -520,10 +519,13 @@ impl WindowedEngine {
     }
 
     fn acquire_next_swapchain_image(&mut self) -> Option<(u32, SwapchainAcquireFuture)> {
-        let err =
+        // let now = Instant::now();
+        let result =
             swapchain::acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap);
+        // let elapsed = now.elapsed();
+        // println!("Acquire next swapchain image took: {elapsed:?}");
 
-        let (swap_image_index, suboptimal_image, acquire_future) = match err {
+        let (swap_image_index, suboptimal_image, acquire_future) = match result {
             Ok(r) => r,
             Err(VulkanError::OutOfDate) => {
                 self.recreate_swapchain = true;

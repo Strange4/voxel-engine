@@ -1,8 +1,7 @@
-use core::f32;
 use egui::{Align2, RichText};
 use egui_winit_vulkano::Gui;
 use glam::Vec3;
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, f32, sync::Arc, time::Instant};
 use voxel_engine::{
     camera::Camera,
     engine::{Engine, WindowedEngine},
@@ -15,14 +14,13 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-const RADIUS_MOVE_AMOUNT: f32 = f32::consts::FRAC_PI_8 / 2.0;
-
 pub struct App {
     window: Option<Arc<Window>>,
     engine: Option<Engine<WindowedEngine>>,
     settings: AppSettings,
     window_resize: bool,
     held_down_keys: HashSet<KeyCode>,
+    last_draw_time: Instant,
 }
 
 impl ApplicationHandler for App {
@@ -41,9 +39,8 @@ impl ApplicationHandler for App {
         _: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let engine = self.engine.as_mut().unwrap();
-        let window = self.window.as_ref().unwrap();
-        if engine.handle_event(&event) {
+        let gui_event = self.engine.as_mut().unwrap().handle_event(&event);
+        if gui_event {
             return;
         }
         match event {
@@ -51,6 +48,11 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(_) => self.window_resize = true,
             WindowEvent::Focused(_) => self.window_resize = true,
             WindowEvent::RedrawRequested => {
+                let delta_time = self.last_draw_time.elapsed().as_secs_f32();
+                self.last_draw_time = Instant::now();
+                let window = self.window.as_ref().unwrap();
+                let engine = self.engine.as_mut().unwrap();
+
                 if self.settings.has_changed {
                     engine.set_camera(self.settings.camera_settings.camera);
                     self.settings.has_changed = false;
@@ -62,12 +64,16 @@ impl ApplicationHandler for App {
                 });
                 self.window_resize = false;
                 window.request_redraw();
+                if self.handle_camera_movement(delta_time) {
+                    self.settings.has_changed = true;
+                }
             }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
                         physical_key: PhysicalKey::Code(key_code),
                         state,
+                        repeat: false,
                         ..
                     },
                 ..
@@ -76,10 +82,6 @@ impl ApplicationHandler for App {
                     self.held_down_keys.insert(key_code);
                 } else {
                     self.held_down_keys.remove(&key_code);
-                }
-
-                if self.handle_camera_movement() {
-                    self.settings.has_changed = true;
                 }
             }
             _ => {}
@@ -94,28 +96,29 @@ impl App {
             engine: None,
             settings: AppSettings {
                 camera_settings: CameraSettings {
-                    camera_centered: false,
-                    speed: 1.0,
-                    camera: Camera::new_at(0.0, 0.0, -50.0),
+                    camera_centered: true,
+                    speed: 25.0,
+                    camera: Camera::new_at(50.0, -50.0, -50.0),
                 },
                 has_changed: true,
             },
             held_down_keys: HashSet::new(),
             window_resize: false,
+            last_draw_time: Instant::now(),
         }
     }
 
-    fn handle_camera_movement(&mut self) -> bool {
+    fn handle_camera_movement(&mut self, delta_time: f32) -> bool {
         if self.settings.camera_settings.camera_centered {
-            return self.handle_spherical_camera_movement();
+            return self.handle_spherical_camera_movement(delta_time);
         } else {
-            return self.handle_free_camera_movement();
+            return self.handle_free_camera_movement(delta_time);
         }
     }
 
-    fn handle_free_camera_movement(&mut self) -> bool {
-        let rotation_speed = self.settings.camera_settings.speed * RADIUS_MOVE_AMOUNT;
-        let translation_speed = self.settings.camera_settings.speed;
+    fn handle_free_camera_movement(&mut self, delta_time: f32) -> bool {
+        let rotation_speed = self.settings.camera_settings.speed * 0.1 * delta_time;
+        let translation_speed = self.settings.camera_settings.speed * delta_time;
         let held_keys = &self.held_down_keys;
         let mut handled = false;
 
@@ -192,10 +195,11 @@ impl App {
         return handled;
     }
 
-    fn handle_spherical_camera_movement(&mut self) -> bool {
-        let center = Vec3::new(0.0, 0.0, 0.0);
-        let radial_speed = self.settings.camera_settings.speed * RADIUS_MOVE_AMOUNT;
-        let translation_speed = self.settings.camera_settings.speed;
+    fn handle_spherical_camera_movement(&mut self, delta_time: f32) -> bool {
+        let center = Vec3::ZERO;
+        let radial_speed = self.settings.camera_settings.speed * 0.1 * delta_time;
+        let translation_speed = self.settings.camera_settings.speed * delta_time;
+
         let held_keys = &self.held_down_keys;
 
         if held_keys.contains(&KeyCode::ArrowRight) {
@@ -214,13 +218,13 @@ impl App {
             self.settings
                 .camera_settings
                 .camera
-                .move_spherically_while_looking_at(center, -radial_speed, 0.0)
+                .move_spherically_while_looking_at(center, radial_speed, 0.0)
         }
         if held_keys.contains(&KeyCode::ArrowUp) {
             self.settings
                 .camera_settings
                 .camera
-                .move_spherically_while_looking_at(center, radial_speed, 0.0)
+                .move_spherically_while_looking_at(center, -radial_speed, 0.0)
         }
         if held_keys.contains(&KeyCode::KeyW) {
             self.settings
@@ -246,11 +250,10 @@ impl App {
             .anchor(Align2::LEFT_TOP, [5.0, 5.0])
             .show(&ctx, |ui| {
                 ui.label(format!("Rendering Time: {render_time_ms:.3}ms"));
-                ui.separator();
                 ui.label(RichText::new("Camera").size(20.0));
                 settings_changed = ui
                     .add(
-                        egui::Slider::new(&mut settings.camera_settings.speed, 0.0..=2.0)
+                        egui::Slider::new(&mut settings.camera_settings.speed, 0.0..=100.0)
                             .text("Speed"),
                     )
                     .changed()
@@ -270,7 +273,7 @@ impl App {
                 let camera_handling_changed = ui
                     .add(egui::Checkbox::new(
                         &mut settings.camera_settings.camera_centered,
-                        "Center at 0",
+                        "Center",
                     ))
                     .changed();
                 settings_changed = camera_handling_changed || settings_changed;

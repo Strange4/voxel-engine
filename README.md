@@ -1,7 +1,5 @@
 # TODO
 
-### Fix camera in spherical coordinates
-
 ### Add focal blur to the camera tracing
 
 ### Make every constant value adjustable through the UI
@@ -20,6 +18,10 @@
 ### START RAY TRACING!!!
 
 Should probably add turn on and off features in the ui so that I can see the performance and visual difference
+
+### Dispatch the compute shader independently from the swapchain so that you can render + blend images faster than you can present
+
+Don't wait for the swapchain to be presented. Dispatch the compute shader as fast as possible and the present command buffer should only present copy and present the output from the compute shader. Make sure to use fences and signals so that you don't write and read from the output image at the same time.
 
 ## Benchark log
 
@@ -110,6 +112,7 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+- [x] Fix camera in spherical coordinates
 - [x] Add free camera checkbox
 - [x] Fix bug when looking away from the origin from inside the cube
 - [x] Fix infinite loop in shader: Nvidia nsight graphics says that the device _hung_ while executing which I think its an infinite loop. ![nsight-graphics-hung](./assets/image.png)
