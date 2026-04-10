@@ -1,4 +1,4 @@
-use egui::{Align2, RichText};
+use egui::{Align2, Slider};
 use egui_winit_vulkano::Gui;
 use glam::Vec3;
 use std::{collections::HashSet, f32, sync::Arc, time::Instant};
@@ -48,25 +48,28 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(_) => self.window_resize = true,
             WindowEvent::Focused(_) => self.window_resize = true,
             WindowEvent::RedrawRequested => {
+                // get delta
                 let delta_time = self.last_draw_time.elapsed().as_secs_f32();
                 self.last_draw_time = Instant::now();
+
+                // Move the camera
+                self.settings.camera_settings.camera_changed =
+                    self.handle_camera_movement(delta_time);
+
+                // change the settings before drawing
+                self.handle_settings_change();
+
                 let window = self.window.as_ref().unwrap();
                 let engine = self.engine.as_mut().unwrap();
 
-                if self.settings.has_changed {
-                    engine.set_camera(self.settings.camera_settings.camera);
-                    self.settings.has_changed = false;
-                }
-
+                // render the frame + gui
                 let rendering_time_ns = engine.image_draw_time_ns();
                 engine.draw_with_gui(window, self.window_resize, |gui| {
                     Self::render_gui(gui, &mut self.settings, rendering_time_ns);
                 });
+
                 self.window_resize = false;
                 window.request_redraw();
-                if self.handle_camera_movement(delta_time) {
-                    self.settings.has_changed = true;
-                }
             }
             WindowEvent::KeyboardInput {
                 event:
@@ -99,8 +102,12 @@ impl App {
                     camera_centered: true,
                     speed: 25.0,
                     camera: Camera::new_at(50.0, -50.0, -50.0),
+                    camera_changed: true,
                 },
-                has_changed: true,
+                shader_settings: ShaderSettings {
+                    show_traversal_color: false,
+                    has_changed: true,
+                },
             },
             held_down_keys: HashSet::new(),
             window_resize: false,
@@ -245,55 +252,80 @@ impl App {
     fn render_gui(gui: &mut Gui, settings: &mut AppSettings, rendering_time_ns: f64) {
         let ctx = gui.context();
         let render_time_ms = rendering_time_ns / 1_000_000.0;
-        let mut settings_changed = false;
+        let mut camera_changed = false;
+        let mut shader_settings_changed = false;
         egui::Window::new("Settings")
             .anchor(Align2::LEFT_TOP, [5.0, 5.0])
             .show(&ctx, |ui| {
                 ui.label(format!("Rendering Time: {render_time_ms:.3}ms"));
-                ui.label(RichText::new("Camera").size(20.0));
-                settings_changed = ui
-                    .add(
-                        egui::Slider::new(&mut settings.camera_settings.speed, 0.0..=100.0)
-                            .text("Speed"),
-                    )
-                    .changed()
-                    || settings_changed;
 
-                settings_changed = ui
-                    .add(
-                        egui::Slider::new(
-                            &mut settings.camera_settings.camera.field_of_view,
-                            10.0..=90.0,
+                // Camera Drawing
+                ui.collapsing("Camera", |ui| {
+                    ui.add(
+                        Slider::new(&mut settings.camera_settings.speed, 0.0..=100.0).text("Speed"),
+                    );
+
+                    camera_changed = ui
+                        .add(
+                            Slider::new(
+                                &mut settings.camera_settings.camera.field_of_view,
+                                10.0..=90.0,
+                            )
+                            .text("Field of view"),
                         )
-                        .text("Field of view"),
-                    )
-                    .changed()
-                    || settings_changed;
+                        .changed()
+                        || camera_changed;
 
-                let camera_handling_changed = ui
-                    .add(egui::Checkbox::new(
-                        &mut settings.camera_settings.camera_centered,
-                        "Center",
-                    ))
-                    .changed();
-                settings_changed = camera_handling_changed || settings_changed;
+                    let camera_handling_changed = ui
+                        .checkbox(&mut settings.camera_settings.camera_centered, "Center")
+                        .changed();
 
-                if camera_handling_changed && settings.camera_settings.camera_centered {
-                    settings.camera_settings.camera.look_at(Vec3::ZERO);
-                }
+                    if camera_handling_changed && settings.camera_settings.camera_centered {
+                        settings.camera_settings.camera.look_at(Vec3::ZERO);
+                    }
+                });
+
+                ui.collapsing("Shader", |ui| {
+                    shader_settings_changed = ui
+                        .checkbox(
+                            &mut settings.shader_settings.show_traversal_color,
+                            "Show Traveral Steps",
+                        )
+                        .changed()
+                        || shader_settings_changed;
+                });
             });
 
-        settings.has_changed = settings_changed;
+        settings.camera_settings.camera_changed = camera_changed;
+    }
+
+    fn handle_settings_change(&mut self) {
+        let engine = self.engine.as_mut().unwrap();
+        if self.settings.camera_settings.camera_centered {
+            engine.set_camera(self.settings.camera_settings.camera);
+            self.settings.camera_settings.camera_changed = false;
+        }
+
+        if self.settings.shader_settings.has_changed {
+            let flags = self.settings.shader_settings.show_traversal_color as u8;
+            engine.set_shader_flags(flags);
+        }
     }
 }
 
 struct AppSettings {
     camera_settings: CameraSettings,
-    has_changed: bool,
+    shader_settings: ShaderSettings,
 }
 
 struct CameraSettings {
     camera_centered: bool,
     speed: f32,
     camera: Camera,
+    camera_changed: bool,
+}
+
+struct ShaderSettings {
+    show_traversal_color: bool,
+    has_changed: bool,
 }

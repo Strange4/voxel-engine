@@ -1,23 +1,19 @@
 # TODO
 
-### Add focal blur to the camera tracing
-
 ### Make every constant value adjustable through the UI
 
-- Focal distance
-- Focal blur
-- Color palette
 - Model selection
-- Traversal depth visualization checkbox
 - Rendering size in pixels (like 1920x1080)
-
-### Load multiple models from the same .vox file
-
-### use sparse voxel octrees in traversal and storage
 
 ### START RAY TRACING!!!
 
-Should probably add turn on and off features in the ui so that I can see the performance and visual difference
+Should probably add turn on and off features in the ui so that I can see the performance and visual difference.
+
+### Add focal blur setting
+
+### use sparse voxel octrees in traversal and storage
+
+### Load multiple models from the same .vox file
 
 ### Dispatch the compute shader independently from the swapchain so that you can render + blend images faster than you can present
 
@@ -136,6 +132,9 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 - [More vox models](https://paulbourke.net/dataformats/vox/models/)
 - [Vox file structure](https://astrorenales.github.io/vox-viewer/)
 - [Voxel viewer](https://florianfe.github.io/vox-viewer/demo/)
+- [Vulkan spec for push constants and uniforms "Offset and Stride Assignment"](https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#interfaces-resources-layout)
+- [Cool visualizer of unfiform blocks in hlsl that doesn't fit what I need since I use glsl](https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/)
+- [Great video explaining push constant alignment](https://www.youtube.com/watch?v=wlLGLWI9Fdc)
 
 - Fractals
   - https://natureofcode.com/fractals/

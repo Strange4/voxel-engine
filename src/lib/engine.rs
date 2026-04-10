@@ -1,11 +1,13 @@
+mod push_constants;
+
 use std::f32;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use egui_winit_vulkano::{Gui, GuiConfig};
 use glam::{Vec3, vec3};
-use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage};
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
@@ -50,6 +52,8 @@ use crate::vulkan::starter::{
     get_swapchain, get_windowed_instance,
 };
 
+use crate::engine::push_constants::PushConstants;
+
 type SwapchainFenceFuture = Arc<FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>>;
 type FenceFuture = FenceSignalFuture<CommandBufferExecFuture<Box<dyn GpuFuture>>>;
 
@@ -82,6 +86,7 @@ pub struct WindowedEngine {
 
 pub struct EngineParts {
     camera: Camera,
+    shader_flags: u8,
 
     // stuff that we want to precompute
     push_contants: PushConstants,
@@ -106,30 +111,22 @@ pub struct HeadlessEngine {
     output_image: Arc<Image>,
 }
 
-// Vec3's get padded to vec 4's anyway. So I instead of leaving those bytes to waste we use them to represent the camera
-
-// we have to use vec4's instead of vec3's because of how the padding in the std140 works.
-// They padd the vec3's to vec4's and when we "read" the vec3's in the shader side they will only read what they need
-// please see: https://learnopengl.com/Advanced-OpenGL/Advanced-GLSL Uniform block layout
-// and: https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.align-packed
-// cool visualizer: https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/
-#[repr(C)]
-#[derive(BufferContents, Clone, Copy)]
-struct PushConstants {
-    top_left_pixel: Vec3,
-    camera_x: f32,
-    pixel_delta_right: Vec3,
-    camera_y: f32,
-    pixel_delta_down: Vec3,
-    camera_z: f32,
-}
-
 impl<T> Engine<T> {
     pub fn set_camera(&mut self, camera: Camera) {
         self.engine_parts.camera = camera;
-        self.engine_parts.push_contants = compute_ray_dependencies(
+        self.recompute_push_constants();
+    }
+
+    pub fn set_shader_flags(&mut self, flags: u8) {
+        self.engine_parts.shader_flags = flags;
+        self.recompute_push_constants();
+    }
+
+    fn recompute_push_constants(&mut self) {
+        self.engine_parts.push_contants = PushConstants::new(
             &self.engine_parts.last_image_size,
             &self.engine_parts.camera,
+            self.engine_parts.shader_flags,
         );
     }
 }
@@ -514,8 +511,11 @@ impl WindowedEngine {
         self.descriptor_sets = descriptor_sets;
         engine_parts.last_image_size = [new_dimensions.width, new_dimensions.height];
 
-        engine_parts.push_contants =
-            compute_ray_dependencies(&engine_parts.last_image_size, &engine_parts.camera);
+        engine_parts.push_contants = PushConstants::new(
+            &engine_parts.last_image_size,
+            &engine_parts.camera,
+            engine_parts.shader_flags,
+        );
     }
 
     fn acquire_next_swapchain_image(&mut self) -> Option<(u32, SwapchainAcquireFuture)> {
@@ -552,7 +552,8 @@ fn create_engine_parts(
     query_count: u32,
 ) -> EngineParts {
     let camera = Camera::default();
-    let push_contants = compute_ray_dependencies(&output_image_size, &camera);
+    let default_shader_flags = 0;
+    let push_contants = PushConstants::new(&output_image_size, &camera, default_shader_flags);
 
     let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
         device.clone(),
@@ -572,6 +573,7 @@ fn create_engine_parts(
 
     EngineParts {
         camera,
+        shader_flags: default_shader_flags,
         push_contants,
         device,
         queue,
@@ -634,44 +636,6 @@ fn get_query_timings(
         })
         .collect();
     Some(results)
-}
-
-fn compute_ray_dependencies(image_size: &[u32; 2], camera: &Camera) -> PushConstants {
-    let up_vector: Vec3 = camera.up;
-    let image_width = image_size[0] as f32;
-    let image_height = image_size[1] as f32;
-    let aspect_ratio = image_width / image_height;
-
-    let camera_center = camera.position;
-
-    let viewport_height =
-        2.0 * camera.focal_distance * (camera.field_of_view.to_radians() / 2.0).tan();
-    let viewport_width = aspect_ratio * viewport_height;
-    let camera_relative_forward = camera.direction.normalize();
-
-    let camera_relative_right = camera_relative_forward.cross(up_vector).normalize();
-    let camera_relative_down = camera_relative_forward.cross(camera_relative_right);
-
-    let viewport_right_vector = viewport_width * camera_relative_right;
-    let viewport_down_vector = viewport_height * camera_relative_down;
-
-    let pixel_delta_right = viewport_right_vector / image_width;
-    let pixel_delta_down = viewport_down_vector / image_height;
-
-    let viepwort_upper_left = 0.5 * (-viewport_down_vector - viewport_right_vector)
-        + camera_center
-        + camera_relative_forward * camera.focal_distance;
-
-    let top_left_pixel = viepwort_upper_left + 0.5 * (pixel_delta_down + pixel_delta_right);
-
-    PushConstants {
-        top_left_pixel,
-        pixel_delta_right,
-        pixel_delta_down,
-        camera_x: camera_center.x,
-        camera_y: camera_center.y,
-        camera_z: camera_center.z,
-    }
 }
 
 fn get_images_and_views(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageView>)> {

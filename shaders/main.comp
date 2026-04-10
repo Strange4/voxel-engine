@@ -10,13 +10,14 @@ layout(set = 0, binding = 0, rgba8) uniform image2D out_image;
 layout(set = 0, binding = 1, rgba8) uniform image3D model;
 
 // we use vec4's for alignment because vec3's get padded anyway
-layout(std140, push_constant) uniform PushConstants {
+layout(push_constant) uniform PushConstants {
     vec3 top_left_pixel;
     float camera_x;
     vec3 pixel_delta_right;
     float camera_y;
     vec3 pixel_delta_down;
     float camera_z;
+    uint shader_flags;
 } push_constants;
 
 vec4 getVoxelAtCoord(vec3 coord, AABB aabb) {
@@ -39,7 +40,7 @@ bool pointIsInsideBox(vec3 point, AABB box) {
     return all(greaterThanEqual(point, box.minPos)) && all(lessThanEqual(point, box.minPos + box.size));
 }
 
-vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
+vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb, bool show_steps) {
     float tMin = tMinMax.x;
     float tMax = tMinMax.y;
     vec3 currentPoint;
@@ -82,13 +83,16 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb) {
         currentPoint[axis] += planeStep[axis];
         t[axis] += tDelta[axis];
     }
-    // return vec4(vec3(0.156862745).xyz, 1);
-    float maxSteps = float(aabb.size.x + aabb.size.y + aabb.size.z);
-    float stepRatio = float(steps) / maxSteps;
-    return vec4(vec3(stepRatio).xyz, 1);
+    if (show_steps) {
+        float maxSteps = float(aabb.size.x + aabb.size.y + aabb.size.z);
+        float stepRatio = float(steps) / maxSteps;
+        return vec4(vec3(stepRatio).xyz, 1);
+    } else {
+        return vec4(vec3(0.156862745).xyz, 1);
+    }
 }
 
-vec4 rayColor(Ray ray) {
+vec4 rayColor(Ray ray, bool show_steps) {
     vec3 modelSize = vec3(imageSize(model));
     vec3 modelPosition = modelSize * -0.5;
     AABB aabb = AABB(modelPosition, modelSize);
@@ -98,7 +102,7 @@ vec4 rayColor(Ray ray) {
     if (tMin >= tMax || tMax < 0) {
         return vec4(vec3(0.156862745).xyz, 1);
     }
-    return traverse_and_get_color(ray, tMinMax, aabb);
+    return traverse_and_get_color(ray, tMinMax, aabb, show_steps);
 }
 
 void main() {
@@ -108,10 +112,12 @@ void main() {
     vec3 pixel_delta_right = push_constants.pixel_delta_right.xyz;
     vec3 pixel_delta_down = push_constants.pixel_delta_down.xyz;
     vec3 camera_center = vec3(push_constants.camera_x, push_constants.camera_y, push_constants.camera_z);
+    bool show_steps = bool(push_constants.shader_flags & 1);
 
     vec3 pixelCenter = top_left_pixel + gl_GlobalInvocationID.x * pixel_delta_right + gl_GlobalInvocationID.y * pixel_delta_down;
     vec3 rayDirection = normalize(pixelCenter - camera_center);
     Ray ray = Ray(camera_center, rayDirection);
-    vec4 color = rayColor(ray);
+
+    vec4 color = rayColor(ray, show_steps);
     imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), color);
 }
