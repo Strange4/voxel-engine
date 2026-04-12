@@ -2,8 +2,7 @@
 
 ### Make every constant value adjustable through the UI
 
-- Model selection
-- Rendering size in pixels (like 1920x1080)
+- Rendering size in pixels (like 1920x1080): You should use a multiplier of the screen size and show the resolution in the slider text
 
 ### START RAY TRACING!!!
 
@@ -108,6 +107,7 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+- [x] Add output image resolution change
 - [x] Fix camera in spherical coordinates
 - [x] Add free camera checkbox
 - [x] Fix bug when looking away from the origin from inside the cube

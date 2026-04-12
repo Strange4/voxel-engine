@@ -8,7 +8,6 @@ use vulkano::image::{Image, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions};
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
 use vulkano::{Validated, VulkanLibrary};
-use winit::dpi::PhysicalSize;
 use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use winit::window::Window;
 
@@ -55,7 +54,7 @@ pub fn get_swapchain(
     device: Arc<Device>,
     physical_device: &Arc<PhysicalDevice>,
     surface: Arc<Surface>,
-    dimensions: PhysicalSize<u32>,
+    dimensions: [u32; 2],
 ) -> (Arc<Swapchain>, Vec<Arc<Image>>) {
     let caps = physical_device
         .surface_capabilities(&surface, Default::default())
@@ -72,7 +71,7 @@ pub fn get_swapchain(
         SwapchainCreateInfo {
             min_image_count: caps.min_image_count, // How many buffers to use in the swapchain
             image_format: format.0,
-            image_extent: dimensions.into(),
+            image_extent: dimensions,
             image_color_space: format.1,
             image_usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_DST, // What the images are going to be used for
             composite_alpha,

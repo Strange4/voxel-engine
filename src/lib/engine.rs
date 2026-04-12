@@ -1,12 +1,12 @@
+mod compute_shader;
+mod engine_parts;
 mod push_constants;
-
-use std::f32;
-use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
 
 use egui_winit_vulkano::{Gui, GuiConfig};
 use glam::{Vec3, vec3};
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
@@ -16,7 +16,6 @@ use vulkano::command_buffer::{
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::layout::DescriptorSetLayout;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
-use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::image::view::{ImageView, ImageViewCreateInfo};
@@ -25,25 +24,20 @@ use vulkano::memory::allocator::{
     AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryTypeFilter,
     StandardMemoryAllocator,
 };
-use vulkano::pipeline::compute::ComputePipelineCreateInfo;
-use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
-use vulkano::pipeline::{
-    ComputePipeline, Pipeline, PipelineBindPoint, PipelineLayout, PipelineShaderStageCreateInfo,
-};
-use vulkano::query::{QueryPool, QueryPoolCreateInfo, QueryResultFlags, QueryType};
-use vulkano::shader::ShaderModule;
+use vulkano::pipeline::{ComputePipeline, Pipeline, PipelineBindPoint};
+use vulkano::query::QueryPool;
 use vulkano::swapchain::{
     self, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo,
 };
 use vulkano::sync::future::FenceSignalFuture;
+use vulkano::sync::{self, GpuFuture, PipelineStage};
 use vulkano::{Validated, VulkanError};
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-use vulkano::sync::{self, GpuFuture, PipelineStage};
-
 use crate::camera::Camera;
+use crate::engine::engine_parts::EngineParts;
 use crate::voxel_data::XYZIVoxelData;
 use crate::voxel_loader::VoxFile;
 use crate::vulkan::starter::{
@@ -53,6 +47,7 @@ use crate::vulkan::starter::{
 };
 
 use crate::engine::push_constants::PushConstants;
+use crate::vulkan::timings::get_query_timings;
 
 type SwapchainFenceFuture = Arc<FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>>;
 type FenceFuture = FenceSignalFuture<CommandBufferExecFuture<Box<dyn GpuFuture>>>;
@@ -70,7 +65,6 @@ pub struct WindowedEngine {
     copy_time: f64,
 
     // swapchchain necessities
-    recreate_swapchain: bool,
     swapchain: Arc<Swapchain>,
     previous_fence: usize,
     fences: Vec<Option<SwapchainFenceFuture>>,
@@ -82,27 +76,6 @@ pub struct WindowedEngine {
     descriptor_sets: Vec<Arc<DescriptorSet>>,
 
     gui: Gui,
-}
-
-pub struct EngineParts {
-    camera: Camera,
-    shader_flags: u8,
-
-    // stuff that we want to precompute
-    push_contants: PushConstants,
-    last_image_size: [u32; 2],
-
-    // Vulkan nececities
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-
-    // stuff required for the compute shader
-    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    compute_pipeline: Arc<ComputePipeline>,
-
-    // for timings
-    query_pool: Arc<QueryPool>,
-    timestamp_period: f64,
 }
 
 pub struct HeadlessEngine {
@@ -124,7 +97,7 @@ impl<T> Engine<T> {
 
     fn recompute_push_constants(&mut self) {
         self.engine_parts.push_contants = PushConstants::new(
-            &self.engine_parts.last_image_size,
+            &self.engine_parts.image_size,
             &self.engine_parts.camera,
             self.engine_parts.shader_flags,
         );
@@ -132,8 +105,9 @@ impl<T> Engine<T> {
 }
 
 impl Engine<WindowedEngine> {
-    pub fn new(window: Arc<Window>, event_loop: &ActiveEventLoop) -> Self {
-        let (renderer, engine_parts) = WindowedEngine::new_with_parts(window, event_loop);
+    pub fn new(resolution: [u32; 2], window: Arc<Window>, event_loop: &ActiveEventLoop) -> Self {
+        let (renderer, engine_parts) =
+            WindowedEngine::new_with_parts(resolution, window, event_loop);
 
         Self {
             engine_parts,
@@ -141,25 +115,17 @@ impl Engine<WindowedEngine> {
         }
     }
 
-    pub fn draw(&mut self, window: &Arc<Window>, window_resized: bool) {
+    pub fn draw(&mut self, window: &Arc<Window>) {
         self.renderer
-            .draw::<fn(&mut Gui)>(window, window_resized, &mut self.engine_parts, None);
+            .draw::<fn(&mut Gui)>(&mut self.engine_parts, window, None);
     }
 
-    pub fn draw_with_gui<RenderGuiFn>(
-        &mut self,
-        window: &Arc<Window>,
-        window_resized: bool,
-        gui_draw_fn: RenderGuiFn,
-    ) where
+    pub fn draw_with_gui<RenderGuiFn>(&mut self, window: &Arc<Window>, gui_draw_fn: RenderGuiFn)
+    where
         RenderGuiFn: FnOnce(&mut Gui),
     {
-        self.renderer.draw(
-            window,
-            window_resized,
-            &mut self.engine_parts,
-            Some(gui_draw_fn),
-        );
+        self.renderer
+            .draw(&mut self.engine_parts, window, Some(gui_draw_fn));
     }
 
     /// See docs for pass_event_to_gui
@@ -169,6 +135,15 @@ impl Engine<WindowedEngine> {
 
     pub fn image_draw_time_ns(&self) -> f64 {
         self.renderer.compute_time + self.renderer.copy_time
+    }
+
+    pub fn resize_output_image(&mut self, new_size: [u32; 2]) {
+        self.engine_parts.image_size = new_size;
+        self.renderer.handle_output_resize(&mut self.engine_parts);
+    }
+
+    pub fn resize_window(&mut self, window: &Arc<Window>) {
+        self.renderer.handle_recreate_swapchain(window);
     }
 }
 
@@ -194,7 +169,8 @@ impl HeadlessEngine {
         let (device, queue) =
             get_headless_device_and_queue(physical_device.clone(), queue_family_index);
 
-        let engine_parts = create_engine_parts(
+        let engine_parts = EngineParts::new(
+            Camera::default(),
             output_image_size,
             &physical_device,
             device,
@@ -202,13 +178,8 @@ impl HeadlessEngine {
             MAX_TIMESTAMP_QUERIES_PER_IMAGE,
         );
 
-        let (descriptor_set, output_image) = create_descriptor_set_and_output_image(
-            &engine_parts.device,
-            &engine_parts.queue,
-            &engine_parts.compute_pipeline,
-            &output_image_size,
-            engine_parts.command_buffer_allocator.clone(),
-        );
+        let (descriptor_set, output_image) =
+            Self::create_descriptor_set_and_output_image(&output_image_size, &engine_parts);
 
         let me = Self {
             descriptor_set,
@@ -279,13 +250,48 @@ impl HeadlessEngine {
 
         Some(time)
     }
+
+    fn create_descriptor_set_and_output_image(
+        image_size: &[u32; 2],
+        engine_parts: &EngineParts,
+    ) -> (Arc<DescriptorSet>, Arc<Image>) {
+        let pipeline_layout = engine_parts.compute_pipeline.layout();
+        let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
+        let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+            engine_parts.device.clone(),
+            Default::default(),
+        ));
+
+        let allocator = Arc::new(StandardMemoryAllocator::new_default(
+            engine_parts.device.clone(),
+        ));
+
+        let model = create_model_and_fill(
+            engine_parts.device.clone(),
+            allocator.clone(),
+            engine_parts.command_buffer_allocator.clone(),
+            engine_parts.queue.clone(),
+        );
+
+        let model_image_view = ImageView::new_default(model).unwrap();
+        get_descriptor_set_and_output_image(
+            image_size,
+            model_image_view,
+            allocator,
+            descriptor_set_allocator,
+            descriptor_set_layout.clone(),
+        )
+    }
 }
 
 impl WindowedEngine {
-    fn new_with_parts(window: Arc<Window>, event_loop: &ActiveEventLoop) -> (Self, EngineParts) {
+    fn new_with_parts(
+        resolution: [u32; 2],
+        window: Arc<Window>,
+        event_loop: &ActiveEventLoop,
+    ) -> (Self, EngineParts) {
         let instance = get_windowed_instance(&window);
         let surface = Surface::from_window(instance.clone(), window.clone()).unwrap();
-        let dimensions = window.inner_size();
 
         let (physical_device, queue_family_index) =
             get_physical_device_and_family_index_for_surface(&surface, &instance);
@@ -295,26 +301,22 @@ impl WindowedEngine {
             device.clone(),
             &physical_device,
             surface.clone(),
-            dimensions,
+            window.inner_size().into(),
         );
 
-        let extent: [u32; 3] = images[0].extent();
-        let last_image_size = [extent[0], extent[1]];
-
-        let compute_shader = cs::load(device.clone()).unwrap();
-        let compute_pipeline = get_compute_pipeline(&device, &compute_shader);
-        let (output_images, descriptor_sets) =
-            create_descriptor_sets_and_output_images(&images, &compute_pipeline, &queue, &device);
-
-        let engine_parts = create_engine_parts(
-            last_image_size,
+        let engine_parts = EngineParts::new(
+            Camera::default(),
+            resolution,
             &physical_device,
             device,
             queue.clone(),
             images.len() as u32 * MAX_TIMESTAMP_QUERIES_PER_IMAGE,
         );
 
-        let images_and_views = get_images_and_views(images);
+        let (descriptor_sets, output_images) =
+            Self::create_descriptor_sets_and_output_images(images.len() as u32, &engine_parts);
+
+        let images_and_views = Self::create_views_from_images(images);
 
         let gui = Gui::new(
             event_loop,
@@ -338,7 +340,6 @@ impl WindowedEngine {
         let renderer = Self {
             compute_time: 0.0,
             copy_time: 0.0,
-            recreate_swapchain: false,
             swapchain,
             previous_fence: 0,
             fences,
@@ -354,21 +355,19 @@ impl WindowedEngine {
 
     fn draw<RenderFn>(
         &mut self,
-        window: &Arc<Window>,
-        window_resized: bool,
+        // window_resized: bool,
         engine_parts: &mut EngineParts,
+        window: &Arc<Window>,
         gui_draw_fn: Option<RenderFn>,
     ) where
         RenderFn: FnOnce(&mut Gui),
     {
-        self.handle_recreate_swapchain(window, window_resized, engine_parts);
-
         // draw the gui before we have to wait for the fence. We will have to wait for the fence less
         if let Some(render_fn) = gui_draw_fn {
             self.gui.immediate_ui(render_fn);
         }
 
-        let maybe_swapchain = self.acquire_next_swapchain_image();
+        let maybe_swapchain = self.acquire_next_swapchain_image(window);
         if maybe_swapchain.is_none() {
             return;
         }
@@ -436,7 +435,7 @@ impl WindowedEngine {
         let future = match execution.map_err(Validated::unwrap) {
             Ok(future) => Some(Arc::new(future)),
             Err(VulkanError::OutOfDate) => {
-                self.recreate_swapchain = true;
+                self.handle_recreate_swapchain(window);
                 None
             }
             Err(err) => panic!("{err}"),
@@ -475,206 +474,120 @@ impl WindowedEngine {
         self.should_record[swap_image_index as usize] = query_timings.is_some();
     }
 
-    fn handle_recreate_swapchain(
-        &mut self,
-        window: &Arc<Window>,
-        window_resized: bool,
-        engine_parts: &mut EngineParts,
-    ) {
-        if !self.recreate_swapchain && !window_resized {
-            return;
-        }
-
-        let new_dimensions = window.inner_size();
-        self.recreate_swapchain = false;
-        let (new_swapchain, new_images) = self
-            .swapchain
-            .recreate(SwapchainCreateInfo {
-                image_extent: new_dimensions.into(),
-                ..self.swapchain.create_info()
-            })
-            .unwrap();
-        self.swapchain = new_swapchain;
-
-        if !window_resized {
-            return;
-        }
-
-        let (output_images, descriptor_sets) = create_descriptor_sets_and_output_images(
-            &new_images,
-            &engine_parts.compute_pipeline,
-            &engine_parts.queue,
-            &engine_parts.device,
+    fn handle_output_resize(&mut self, engine_parts: &mut EngineParts) {
+        let (descriptor_sets, output_images) = Self::create_descriptor_sets_and_output_images(
+            self.present_images_and_views.len() as u32,
+            &engine_parts,
         );
-        self.present_images_and_views = get_images_and_views(new_images);
+
         self.output_images = output_images;
         self.descriptor_sets = descriptor_sets;
-        engine_parts.last_image_size = [new_dimensions.width, new_dimensions.height];
 
         engine_parts.push_contants = PushConstants::new(
-            &engine_parts.last_image_size,
+            &engine_parts.image_size,
             &engine_parts.camera,
             engine_parts.shader_flags,
         );
     }
 
-    fn acquire_next_swapchain_image(&mut self) -> Option<(u32, SwapchainAcquireFuture)> {
+    fn handle_recreate_swapchain(&mut self, window: &Arc<Window>) {
+        let (new_swapchain, new_images) = self
+            .swapchain
+            .recreate(SwapchainCreateInfo {
+                image_extent: window.inner_size().into(),
+                ..self.swapchain.create_info()
+            })
+            .unwrap();
+        self.swapchain = new_swapchain;
+
+        self.present_images_and_views = Self::create_views_from_images(new_images);
+    }
+
+    fn acquire_next_swapchain_image(
+        &mut self,
+        window: &Arc<Window>,
+    ) -> Option<(u32, SwapchainAcquireFuture)> {
         // let now = Instant::now();
         let result =
             swapchain::acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap);
-        // let elapsed = now.elapsed();
-        // println!("Acquire next swapchain image took: {elapsed:?}");
 
         let (swap_image_index, suboptimal_image, acquire_future) = match result {
             Ok(r) => r,
             Err(VulkanError::OutOfDate) => {
-                self.recreate_swapchain = true;
+                self.handle_recreate_swapchain(window);
                 return None;
             }
             Err(err) => panic!("{}", err),
         };
 
         if suboptimal_image {
-            self.recreate_swapchain = true;
+            self.handle_recreate_swapchain(window);
         }
 
         Some((swap_image_index, acquire_future))
     }
-}
 
-/// please input the TOTAL number_of_queries that the query pool can have
-/// If you have a swapchain and each image does a query, multiply them
-fn create_engine_parts(
-    output_image_size: [u32; 2],
-    physical_device: &Arc<PhysicalDevice>,
-    device: Arc<Device>,
-    queue: Arc<Queue>,
-    query_count: u32,
-) -> EngineParts {
-    let camera = Camera::default();
-    let default_shader_flags = 0;
-    let push_contants = PushConstants::new(&output_image_size, &camera, default_shader_flags);
+    fn create_descriptor_sets_and_output_images(
+        number_of_present_images: u32,
+        engine_parts: &EngineParts,
+    ) -> (Vec<Arc<DescriptorSet>>, Vec<Arc<Image>>) {
+        let pipeline_layout = engine_parts.compute_pipeline.layout();
+        let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
+        let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
+            engine_parts.device.clone(),
+            Default::default(),
+        ));
+        let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
+            engine_parts.device.clone(),
+            Default::default(),
+        ));
 
-    let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
-    let compute_shader = cs::load(device.clone()).unwrap();
-    let compute_pipeline = get_compute_pipeline(&device, &compute_shader);
+        let allocator = Arc::new(StandardMemoryAllocator::new_default(
+            engine_parts.device.clone(),
+        ));
 
-    let query_pool = QueryPool::new(
-        device.clone(),
-        QueryPoolCreateInfo {
-            query_count,
-            ..QueryPoolCreateInfo::query_type(QueryType::Timestamp)
-        },
-    )
-    .unwrap();
+        let model = create_model_and_fill(
+            engine_parts.device.clone(),
+            allocator.clone(),
+            command_buffer_allocator,
+            engine_parts.queue.clone(),
+        );
 
-    EngineParts {
-        camera,
-        shader_flags: default_shader_flags,
-        push_contants,
-        device,
-        queue,
-        command_buffer_allocator,
-        compute_pipeline,
-        query_pool,
-        timestamp_period: physical_device.properties().timestamp_period as f64,
-        last_image_size: output_image_size,
+        let model_image_view = ImageView::new_default(model).unwrap();
+
+        let mut descriptor_sets = Vec::new();
+        let mut output_images = Vec::new();
+        for _ in 0..number_of_present_images {
+            let (descriptor_set, image) = get_descriptor_set_and_output_image(
+                &engine_parts.image_size,
+                model_image_view.clone(),
+                allocator.clone(),
+                descriptor_set_allocator.clone(),
+                descriptor_set_layout.clone(),
+            );
+            descriptor_sets.push(descriptor_set);
+            output_images.push(image);
+        }
+        (descriptor_sets, output_images)
     }
-}
 
-fn get_query_timings(
-    query_pool: &Arc<QueryPool>,
-    query_index_start: u32,
-    number_of_queries: u32,
-    timestamp_period: f64,
-    wait_for_query: bool,
-) -> Option<Vec<f64>> {
-    if wait_for_query {
-        let mut timing_results: Vec<u64> = vec![0; number_of_queries as usize];
-        query_pool
-            .get_results(
-                query_index_start..query_index_start + number_of_queries,
-                &mut timing_results,
-                QueryResultFlags::WAIT,
-            )
-            .unwrap();
-        let results = timing_results
+    fn create_views_from_images(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageView>)> {
+        images
             .into_iter()
-            .map(|value| value as f64 * timestamp_period)
-            .collect();
-        return Some(results);
+            .map(|image| {
+                let view = ImageView::new(
+                    image.clone(),
+                    ImageViewCreateInfo {
+                        format: image.format(),
+                        subresource_range: image.subresource_range(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                (image, view)
+            })
+            .collect()
     }
-
-    let mut timing_results: Vec<u64> = vec![0; (number_of_queries * 2) as usize];
-    query_pool
-        .get_results(
-            query_index_start..query_index_start + number_of_queries,
-            &mut timing_results,
-            QueryResultFlags::WITH_AVAILABILITY,
-        )
-        .unwrap();
-    let all_available = !timing_results
-        .iter()
-        .enumerate()
-        .any(|(index, &value)| index % 2 == 1 && value == 0);
-
-    if !all_available {
-        return None;
-    }
-    let results = timing_results
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, value)| {
-            if index % 2 == 1 {
-                None
-            } else {
-                Some(value as f64 * timestamp_period)
-            }
-        })
-        .collect();
-    Some(results)
-}
-
-fn get_images_and_views(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageView>)> {
-    images
-        .into_iter()
-        .map(|image| {
-            let view = ImageView::new(
-                image.clone(),
-                ImageViewCreateInfo {
-                    format: image.format(),
-                    subresource_range: image.subresource_range(),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            (image, view)
-        })
-        .collect()
-}
-
-fn get_compute_pipeline(
-    device: &Arc<Device>,
-    compute_shader: &Arc<ShaderModule>,
-) -> Arc<ComputePipeline> {
-    let cs = compute_shader.entry_point("main").unwrap();
-    let stage = PipelineShaderStageCreateInfo::new(cs);
-    let layout = PipelineLayout::new(
-        device.clone(),
-        PipelineDescriptorSetLayoutCreateInfo::from_stages([&stage])
-            .into_pipeline_layout_create_info(device.clone())
-            .unwrap(),
-    )
-    .unwrap();
-    ComputePipeline::new(
-        device.clone(),
-        None,
-        ComputePipelineCreateInfo::stage_layout(stage, layout),
-    )
-    .unwrap()
 }
 
 // Gets the command buffer for a single dispatch of the compute shader.
@@ -802,41 +715,9 @@ fn create_draw_to_image_command_buffer(
     builder
 }
 
-fn create_descriptor_set_and_output_image(
-    device: &Arc<Device>,
-    queue: &Arc<Queue>,
-    pipeline: &Arc<ComputePipeline>,
-    image_size: &[u32; 2],
-    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-) -> (Arc<DescriptorSet>, Arc<Image>) {
-    let pipeline_layout = pipeline.layout();
-    let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
-    let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
-
-    let allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
-
-    let model = create_model_and_fill(
-        device.clone(),
-        allocator.clone(),
-        command_buffer_allocator,
-        queue.clone(),
-    );
-
-    let model_image_view = ImageView::new_default(model).unwrap();
-    get_descriptor_set_and_output_image(
-        [image_size[0], image_size[1], 1],
-        model_image_view,
-        allocator,
-        descriptor_set_allocator,
-        descriptor_set_layout.clone(),
-    )
-}
-
+/// Creates the descriptor set of image views that are used by the shader. Also creates the output images that are written into by the shader
 fn get_descriptor_set_and_output_image(
-    image_extent: [u32; 3],
+    output_image_extent: &[u32; 2],
     model_image_view: Arc<ImageView>,
     allocator: Arc<StandardMemoryAllocator>,
     descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
@@ -846,7 +727,7 @@ fn get_descriptor_set_and_output_image(
         allocator,
         ImageCreateInfo {
             format: Format::R8G8B8A8_UNORM,
-            extent: image_extent,
+            extent: [output_image_extent[0], output_image_extent[1], 1],
             image_type: ImageType::Dim2d,
             usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
             ..Default::default()
@@ -872,49 +753,8 @@ fn get_descriptor_set_and_output_image(
 
     (descriptor_set, output_image)
 }
-fn create_descriptor_sets_and_output_images(
-    present_images: &[Arc<Image>],
-    pipeline: &Arc<ComputePipeline>,
-    queue: &Arc<Queue>,
-    device: &Arc<Device>,
-) -> (Vec<Arc<Image>>, Vec<Arc<DescriptorSet>>) {
-    let pipeline_layout = pipeline.layout();
-    let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
-    let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
-    let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
-        device.clone(),
-        Default::default(),
-    ));
 
-    let allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
-
-    let model = create_model_and_fill(
-        device.clone(),
-        allocator.clone(),
-        command_buffer_allocator.clone(),
-        queue.clone(),
-    );
-
-    let model_image_view = ImageView::new_default(model).unwrap();
-
-    present_images
-        .iter()
-        .map(|present_image| {
-            let a = get_descriptor_set_and_output_image(
-                present_image.extent(),
-                model_image_view.clone(),
-                allocator.clone(),
-                descriptor_set_allocator.clone(),
-                descriptor_set_layout.clone(),
-            );
-            (a.1, a.0)
-        })
-        .unzip()
-}
-
+// TODO: make this more generic to load the model from whatever voxel data
 fn create_model_and_fill(
     device: Arc<Device>,
     allocator: Arc<GenericMemoryAllocator<FreeListAllocator>>,
@@ -1066,11 +906,4 @@ fn point_is_part_of_mandelbulb(point: Vec3) -> bool {
         }
     }
     true
-}
-
-mod cs {
-    vulkano_shaders::shader! {
-        ty: "compute",
-        path: "shaders/main.comp"
-    }
 }

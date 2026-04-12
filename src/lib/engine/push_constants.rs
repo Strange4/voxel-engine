@@ -8,7 +8,7 @@ use crate::camera::Camera;
 // we have to use vec4's instead of vec3's because of how the alignment works in push constants in vulkan
 // see: https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.align-packed
 #[repr(C)]
-#[derive(BufferContents, Clone, Copy)]
+#[derive(BufferContents, Clone, Copy, Debug)]
 pub struct PushConstants {
     top_left_pixel: Vec3,
     camera_x: f32,

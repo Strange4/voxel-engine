@@ -3,7 +3,7 @@ use glam::{Mat3, Vec3};
 // In NDC coordinates
 // The Y axis is down the screen, the X axis is to the right and the Z axis in inwards the screen
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Camera {
     pub position: Vec3,
     pub direction: Vec3,
