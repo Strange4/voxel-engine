@@ -62,7 +62,7 @@ impl ApplicationHandler for App {
                 self.last_draw_time = Instant::now();
 
                 // Move the camera
-                self.settings.camera_settings.has_changed = self.handle_camera_movement(delta_time);
+                self.handle_camera_movement(delta_time);
 
                 // change the settings before drawing
                 self.handle_settings_change();
@@ -126,12 +126,15 @@ impl App {
         }
     }
 
-    fn handle_camera_movement(&mut self, delta_time: f32) -> bool {
-        if self.settings.camera_settings.camera_centered {
-            return self.handle_spherical_camera_movement(delta_time);
+    fn handle_camera_movement(&mut self, delta_time: f32) {
+        let has_changed = if self.settings.camera_settings.camera_centered {
+            self.handle_spherical_camera_movement(delta_time)
         } else {
-            return self.handle_free_camera_movement(delta_time);
-        }
+            self.handle_free_camera_movement(delta_time)
+        };
+
+        self.settings.camera_settings.has_changed =
+            self.settings.camera_settings.has_changed || has_changed;
     }
 
     fn handle_free_camera_movement(&mut self, delta_time: f32) -> bool {

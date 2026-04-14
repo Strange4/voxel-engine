@@ -135,6 +135,9 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 - [Vulkan spec for push constants and uniforms "Offset and Stride Assignment"](https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#interfaces-resources-layout)
 - [Cool visualizer of unfiform blocks in hlsl that doesn't fit what I need since I use glsl](https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/)
 - [Great video explaining push constant alignment](https://www.youtube.com/watch?v=wlLGLWI9Fdc)
+- [Voxel Cone tracing but better](https://jose-villegas.github.io/post/deferred_voxel_shading/)
+- [Better than cone tracing?](https://onlinelibrary.wiley.com/doi/10.1111/cgf.15262)
+- [Creating 64 trees for traversal](https://dubiousconst282.github.io/2024/10/03/voxel-ray-tracing/)
 
 - Fractals
     - https://natureofcode.com/fractals/
