@@ -67,6 +67,8 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb, bool show_steps) {
     uint max_steps = uint(aabb.size.x + aabb.size.y + aabb.size.z);
     vec3 maxPoint = aabb.minPos + aabb.size;
 
+    // TODO: make this a for loop with max value of the max steps
+
     // while the current position falls within the bounding box
     while (all(greaterThanEqual(currentPoint, aabb.minPos)) && all(lessThanEqual(currentPoint, maxPoint))) {
         vec4 voxelValue = getVoxelAtCoord(currentPoint, aabb);
