@@ -27,21 +27,21 @@ Starting the window, the engine and then looking at frame time is not a great id
 There are two options that present ourselves that have various pros and cons:
 
 1. Create my own benchmarker
-   - Pros:
-     - Don't have to rewrite code
-     - Can view the tests while they are running!
-     - Creating a benchmarking app would be kinda cool
-   - Cons:
-     - Would have to transform the Application part of the code into having a whole benchmarking suite
+    - Pros:
+        - Don't have to rewrite code
+        - Can view the tests while they are running!
+        - Creating a benchmarking app would be kinda cool
+    - Cons:
+        - Would have to transform the Application part of the code into having a whole benchmarking suite
 2. Use an external library
-   - Pros:
-     - Don't have to write an entire library to benchmark
-     - Could use cirterion that can use statistics, plots and "more rigorous" benchmarking
-     - Would decouple the code into making the entire engine run as a headless application rendering to an image
-     - The benchmarking part of the engine would be decoupled from the application
-     - Running benchmarks would be less tedious
-   - Cons:
-     - Rewriting a lot of code
+    - Pros:
+        - Don't have to write an entire library to benchmark
+        - Could use cirterion that can use statistics, plots and "more rigorous" benchmarking
+        - Would decouple the code into making the entire engine run as a headless application rendering to an image
+        - The benchmarking part of the engine would be decoupled from the application
+        - Running benchmarks would be less tedious
+    - Cons:
+        - Rewriting a lot of code
 
 #### Precomputing camera viewport
 
@@ -137,9 +137,9 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 - [Great video explaining push constant alignment](https://www.youtube.com/watch?v=wlLGLWI9Fdc)
 
 - Fractals
-  - https://natureofcode.com/fractals/
-  - https://www.skytopia.com/project/fractal/mandelbulb.html
-  - https://iquilezles.org/articles/mandelbulb/
+    - https://natureofcode.com/fractals/
+    - https://www.skytopia.com/project/fractal/mandelbulb.html
+    - https://iquilezles.org/articles/mandelbulb/
 
 # How to?
 
@@ -154,5 +154,21 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 ### Use renderdoc
 
-- 1. Make sure you run with the command environment variable set to `WAYLAND_DISPLAY= XDG_SESSION_TYPE=x11 ./qrenderdoc`
-- 2. Run and use renderdoc
+-   1. Make sure you run with the command environment variable set to `WAYLAND_DISPLAY= XDG_SESSION_TYPE=x11 ./qrenderdoc`
+-   2. Run and use renderdoc
+
+# Build requirements on windows
+
+- [Vulkan SDK](https://vulkan.lunarg.com/sdk/home): With the shader toolchain debug symbols
+
+OR
+
+- [CMake](https://cmake.org/download/)
+- [Ninja](https://github.com/ninja-build/ninja/releases)
+- [Python](https://www.python.org/downloads/)
+
+Then run with `CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo run` since shaderc has a minimum version incompatilibiliy with CMake if you're running an up to date version of CMake.
+
+We need all of these because `vulkan_shaders` uses shaderc wich is a C++ lib. You can either download the exe (which they don't provide supported binaries for, like the link doesn't event work anymore) or build it from source. Building from source requires CMake, Ninja & Python. Or.... you could download the Vulkan SDK (3.09GB) which is quite a lot.
+
+I could use naga to compile the shaders manually and try to setup all the code to create the right spirv options. But this would mean to also not use the `egui_winit_vulkano` crate (because they use vulkano_shaders too). Which would also mean that I would need to recreate the egui integration. This is a lot of code that isn't the focus of this application.
