@@ -74,7 +74,10 @@ impl XYZIVoxelData {
         })
     }
 
-    pub fn as_rgba_bytes(&self) -> Vec<u8> {
+    /// Consumes the voxel data and creates a 3d texture data for RGBA bytes of the size of the voxel data.
+    /// The vox XYZ coordinates are mapped to Vulkan NDC
+    /// The bytes are filled in the x, y, z order
+    pub fn as_rgba_bytes(&mut self) -> Vec<u8> {
         let bytes_per_voxel = 4;
         let (x_size, y_size, z_size) = (
             self.size.x as usize,
@@ -84,7 +87,7 @@ impl XYZIVoxelData {
 
         let number_of_voxels = x_size * y_size * z_size;
         let mut bytes = vec![0; bytes_per_voxel * number_of_voxels];
-        self.data.iter().for_each(|voxel| {
+        self.data.drain(..).for_each(|voxel| {
             let (x, y, z) = (voxel.x() as usize, voxel.y() as usize, voxel.z() as usize);
             // The xyz coordinates of the .vox format aren't the same as vulkan's normalized device coordinates
             // The z is up the screen in .vox instead towards inward like in NDC
@@ -100,8 +103,13 @@ impl XYZIVoxelData {
             bytes[start_index + 2] = ((color & 0xFF00) >> 8) as u8; // green;
             bytes[start_index + 3] = (color & 0xFF) as u8; // alpha
         });
+        self.data.shrink_to_fit();
         bytes
     }
+
+    // pub fn as_pallete_bytes() -> Vec<u8> {
+
+    // }
 
     pub fn size(&self) -> &UVec3 {
         &self.size

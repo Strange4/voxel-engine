@@ -762,7 +762,7 @@ fn create_model_and_fill(
     queue: Arc<Queue>,
 ) -> Arc<Image> {
     let vox_file = VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap();
-    let voxel_data = XYZIVoxelData::from_vox_file(vox_file).unwrap();
+    let mut voxel_data = XYZIVoxelData::from_vox_file(vox_file).unwrap();
     let size = voxel_data.size();
     let extent = [size.x, size.y, size.z];
     let image = Image::new(
