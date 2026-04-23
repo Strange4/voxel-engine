@@ -95,11 +95,9 @@ fn test_build_tree_level2() {
         // There's only 2 levels, so if you are a child of the root you must be a leaf
         assert!(child.is_leaf());
         assert!(child.has_children());
+
+        // The voxel is at the same relative position to the root.
+        // E.G. back left child has a voxel in its back left
+        assert_eq!(child.child_mask(), 1 << i);
     }
-
-    const CHILD_WANTED_MASK: u64 =
-        0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0001;
-
-    let child = &tree.node_pool[1];
-    assert_eq!(child.child_mask(), CHILD_WANTED_MASK);
 }
