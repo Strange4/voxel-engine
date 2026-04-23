@@ -37,12 +37,12 @@ impl XYZIVoxelData {
             .map_err(|e| VoxelDataError::TransformChunkError(format!("{e:?}")))?;
 
         let max_voxel_position = xyzi_chunk.voxels().iter().max_by(|&a, &b| {
-            let a_distance = a.x() as u16 * a.x() as u16
-                + a.y() as u16 * a.y() as u16
-                + a.z() as u16 * a.z() as u16;
-            let b_distbnce = b.x() as u16 * b.x() as u16
-                + b.y() as u16 * b.y() as u16
-                + b.z() as u16 * b.z() as u16;
+            let a_distance = a.x() as u32 * a.x() as u32
+                + a.y() as u32 * a.y() as u32
+                + a.z() as u32 * a.z() as u32;
+            let b_distbnce = b.x() as u32 * b.x() as u32
+                + b.y() as u32 * b.y() as u32
+                + b.z() as u32 * b.z() as u32;
             a_distance.cmp(&b_distbnce)
         });
 
@@ -88,10 +88,7 @@ impl XYZIVoxelData {
         let number_of_voxels = x_size * y_size * z_size;
         let mut bytes = vec![0; bytes_per_voxel * number_of_voxels];
         self.data.drain(..).for_each(|voxel| {
-            let (x, y, z) = (voxel.x() as usize, voxel.y() as usize, voxel.z() as usize);
-            // The xyz coordinates of the .vox format aren't the same as vulkan's normalized device coordinates
-            // The z is up the screen in .vox instead towards inward like in NDC
-            let (y, z) = (y_size - z - 1, y);
+            let (x, y, z) = Self::to_ndc(&self.size, &voxel);
 
             let start_index = z * x_size * y_size * bytes_per_voxel
                 + y * x_size * bytes_per_voxel
@@ -107,11 +104,41 @@ impl XYZIVoxelData {
         bytes
     }
 
-    // pub fn as_pallete_bytes() -> Vec<u8> {
+    /// Consumes the voxel data and creates a 3d representation of the collor pallete indices.
+    /// The vox XYZ coordinates are mapped to Vulkan NDC
+    /// The bytes are filled in the x, y, z order
+    pub fn as_pallete_indices(&mut self) -> Vec<u8> {
+        let (x_size, y_size, z_size) = (
+            self.size.x as usize,
+            self.size.y as usize,
+            self.size.z as usize,
+        );
 
-    // }
+        let number_of_voxels = x_size * y_size * z_size;
+        let mut bytes = vec![0; number_of_voxels];
+        self.data.drain(..).for_each(|voxel| {
+            let (x, y, z) = Self::to_ndc(&self.size, &voxel);
+
+            let index = z * x_size * y_size + y * x_size + x;
+            bytes[index] = voxel.i()
+        });
+        bytes
+    }
+
+    fn to_ndc(size: &UVec3, voxel: &XYZIVoxel) -> (usize, usize, usize) {
+        let y_size = size.y as usize;
+        let (x, y, z) = (voxel.x() as usize, voxel.y() as usize, voxel.z() as usize);
+        // The xyz coordinates of the .vox format aren't the same as vulkan's normalized device coordinates
+        // The z is up the screen in .vox instead towards inward like in NDC
+        let (y, z) = (y_size - z - 1, y);
+        (x, y, z)
+    }
 
     pub fn size(&self) -> &UVec3 {
         &self.size
+    }
+
+    pub fn color_pallete(&self) -> &[u32; 256] {
+        &self.color_palette
     }
 }

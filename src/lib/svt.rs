@@ -5,129 +5,81 @@ use vulkano::buffer::BufferContents;
 
 use crate::voxel_data::XYZIVoxelData;
 
-const WITHOUT_IS_LEAF_MASK: u32 = 0x7FFFFFFF;
-const ONLY_LEAF_MASK: u32 = !WITHOUT_IS_LEAF_MASK;
-
-#[derive(Default, Debug)]
-pub struct SvtNode {
-    pub is_leaf: bool,
-    pub child_pointer: u32,
-    pub child_mask: u64,
-    // is_leaf_and_child_pointer: u32,
-    // child_mask_low: u32,
-    // child_mask_high: u32,
-}
-
-impl From<RawSvtNode> for SvtNode {
-    fn from(value: RawSvtNode) -> Self {
-        Self {
-            is_leaf: (value.is_leaf_and_child_pointer & ONLY_LEAF_MASK) != 0,
-            child_pointer: value.is_leaf_and_child_pointer & WITHOUT_IS_LEAF_MASK,
-            child_mask: ((value.child_mask_high as u64) << 32) | value.child_mask_low as u64,
-        }
-    }
-}
-
-impl From<&RawSvtNode> for SvtNode {
-    fn from(value: &RawSvtNode) -> Self {
-        Self {
-            is_leaf: (value.is_leaf_and_child_pointer & ONLY_LEAF_MASK) != 0,
-            child_pointer: value.is_leaf_and_child_pointer & WITHOUT_IS_LEAF_MASK,
-            child_mask: ((value.child_mask_high as u64) << 32) | value.child_mask_low as u64,
-        }
-    }
-}
-
-// impl SvtNode {
-//     const WITHOUT_IS_LEAF_MASK: u32 = 0x7FFFFFFF;
-//     const ONLY_LEAF_MASK: u32 = !Self::WITHOUT_IS_LEAF_MASK;
-
-//     pub fn is_leaf(&self) -> bool {
-//         self.is_leaf_and_child_pointer >> 31 == 1
-//     }
-
-//     pub fn child_pointer(&self) -> u32 {
-//         self.is_leaf_and_child_pointer & Self::WITHOUT_IS_LEAF_MASK
-//     }
-
-//     fn set_child_pointer(&mut self, child_pointer: u32) {
-//         self.is_leaf_and_child_pointer = (child_pointer & Self::WITHOUT_IS_LEAF_MASK)
-//             | (self.is_leaf_and_child_pointer & Self::ONLY_LEAF_MASK);
-//     }
-
-//     fn set_is_leaf(&mut self, is_leaf: bool) {
-//         let value = (is_leaf as u32) << 31;
-//         self.is_leaf_and_child_pointer &= !(1 << 31); // clear the bit
-//         self.is_leaf_and_child_pointer |= value; // set the bit again
-//     }
-
-//     pub fn child_mask(&self) -> u64 {
-//         (self.child_mask_high as u64) << 32 | self.child_mask_low as u64
-//     }
-
-//     fn set_child_mask(&mut self, mask: u64) {
-//         self.child_mask_low = mask as u32;
-//         self.child_mask_high = (mask >> 32) as u32;
-//     }
-// }
-
 #[repr(C)]
 #[derive(BufferContents, Debug, Default)]
-pub struct RawSvtNode {
+pub struct SvtNode {
     is_leaf_and_child_pointer: u32,
     child_mask_high: u32,
     child_mask_low: u32,
 }
 
-impl RawSvtNode {
-    fn has_children(&self) -> bool {
-        self.child_mask_high != 0 && self.child_mask_low != 0
-    }
-}
+impl SvtNode {
+    const WITHOUT_IS_LEAF_MASK: u32 = 0x7FFFFFFF;
 
-impl From<SvtNode> for RawSvtNode {
-    fn from(value: SvtNode) -> Self {
-        let is_leaf_and_child_pointer =
-            (value.is_leaf as u32) << 31 | (value.child_pointer & WITHOUT_IS_LEAF_MASK);
-        let child_mask_high = (value.child_mask >> 32) as u32;
-        let child_mask_low = value.child_mask as u32;
-        Self {
-            is_leaf_and_child_pointer,
-            child_mask_high,
-            child_mask_low,
-        }
+    #[inline]
+    pub fn has_children(&self) -> bool {
+        self.child_mask_high != 0 || self.child_mask_low != 0
     }
-}
 
-impl From<&SvtNode> for RawSvtNode {
-    fn from(value: &SvtNode) -> Self {
-        let is_leaf_and_child_pointer =
-            (value.is_leaf as u32) << 31 | (value.child_pointer & WITHOUT_IS_LEAF_MASK);
-        let child_mask_high = (value.child_mask >> 32) as u32;
-        let child_mask_low = value.child_mask as u32;
-        Self {
-            is_leaf_and_child_pointer,
-            child_mask_high,
-            child_mask_low,
+    #[inline]
+    pub fn is_leaf(&self) -> bool {
+        self.is_leaf_and_child_pointer >> 31 == 1
+    }
+
+    #[inline]
+    pub fn child_pointer(&self) -> u32 {
+        self.is_leaf_and_child_pointer & Self::WITHOUT_IS_LEAF_MASK
+    }
+
+    #[inline]
+    fn set_child_pointer(&mut self, child_pointer: u32) {
+        assert!(child_pointer <= Self::WITHOUT_IS_LEAF_MASK);
+        self.is_leaf_and_child_pointer |= child_pointer;
+    }
+
+    #[inline]
+    fn mark_as_leaf(&mut self) {
+        self.is_leaf_and_child_pointer |= 1 << 31;
+    }
+
+    #[inline]
+    pub fn child_mask(&self) -> u64 {
+        (self.child_mask_high as u64) << 32 | self.child_mask_low as u64
+    }
+
+    #[inline]
+    fn set_child_mask(&mut self, mask: u64) {
+        self.child_mask_low = mask as u32;
+        self.child_mask_high = (mask >> 32) as u32;
+    }
+
+    #[inline]
+    fn mark_child_active(&mut self, child_index: u8) {
+        assert!(child_index <= 64);
+        if child_index > 31 {
+            self.child_mask_high |= 1 << (child_index - 32);
+        } else {
+            self.child_mask_low |= 1 << child_index;
         }
     }
 }
 
 pub struct Svt {
-    pub node_pool: Vec<RawSvtNode>,
+    pub node_pool: Vec<SvtNode>,
     pub leaf_data: Vec<u8>,
 }
 
 impl Svt {
-    pub fn from_voxel_data(mut voxel_data: XYZIVoxelData) -> Self {
-        let data = voxel_data.as_rgba_bytes();
+    /// Creates a Sparse Voxel Tree representation of the voxel data.
+    pub fn from_voxel_data(voxel_data: &mut XYZIVoxelData) -> Self {
+        let data = voxel_data.as_pallete_indices();
         let size = voxel_data.size();
         Self::build_tree(size, &data)
     }
 
     pub fn build_tree(model_size: &UVec3, voxel_bytes: &[u8]) -> Self {
         // make the space for the root to be added at the 0'th spot
-        let mut node_pool = vec![RawSvtNode::default()];
+        let mut node_pool = vec![SvtNode::default()];
         let mut leaf_data = Vec::new();
 
         // We have to make the tree as big as the max side of the model.
@@ -152,13 +104,13 @@ impl Svt {
     }
 
     fn build_tree_recursive(
-        node_pool: &mut Vec<RawSvtNode>,
+        node_pool: &mut Vec<SvtNode>,
         leaf_data: &mut Vec<u8>,
         model_size: &UVec3,
         voxel_bytes: &[u8],
         position: UVec3,
         mut scale: u32,
-    ) -> RawSvtNode {
+    ) -> SvtNode {
         let mut node = SvtNode::default();
 
         // build leaf
@@ -171,23 +123,24 @@ impl Svt {
 
             // if there is no data, this node won't be added to its parent so might as well return now
             if brick.is_none() {
-                return node.into();
+                return node;
             }
 
-            node.is_leaf = true;
+            node.mark_as_leaf();
 
             let mut brick = brick.unwrap();
 
-            node.child_mask = Self::child_mask(&brick);
+            let child_mask = Self::child_mask(&brick);
+            node.set_child_mask(child_mask);
 
-            Self::pack_brick_tightly(&mut brick, node.child_mask);
+            Self::pack_brick_tightly(&mut brick, child_mask);
 
-            // the the child pointer to the data
-            node.child_pointer = leaf_data.len() as u32;
-            let number_of_elements = node.child_mask.count_ones() as usize;
+            // Set the child pointer to the actual leaf data
+            node.set_child_pointer(leaf_data.len() as u32);
+            let number_of_elements = child_mask.count_ones() as usize;
             leaf_data.extend_from_slice(&brick[0..number_of_elements]);
 
-            return node.into();
+            return node;
         }
 
         // if we're not at the ground scale we descend
@@ -215,15 +168,16 @@ impl Svt {
 
             // This child has data, let's keep it
             if child.has_children() {
-                node.child_mask |= 1 << i;
+                node.mark_child_active(i as u8);
                 children.push(child);
             }
         }
 
-        node.child_pointer = node_pool.len() as u32;
+        node.set_child_pointer(node_pool.len() as u32);
+        assert!(node_pool.len() <= 0x7F_FF_FF_FF);
         node_pool.append(&mut children);
 
-        node.into()
+        node
     }
 
     fn get_brick(model_size: &UVec3, voxel_bytes: &[u8], position: &UVec3) -> Option<[u8; 64]> {
@@ -441,26 +395,24 @@ mod test_svt {
 }
 
 #[cfg(test)]
-mod test_raw_svt_node {
+mod test_svt_node {
 
-    use super::{RawSvtNode, SvtNode};
+    use super::SvtNode;
 
     #[test]
-    fn test_everything() {
-        let node = SvtNode {
-            is_leaf: true,
-            child_mask: 0xFF000000FFFFFFFF,
-            child_pointer: 5,
-        };
+    fn test_setting_masks_and_pointers() {
+        let mut node = SvtNode::default();
 
-        let raw_node = RawSvtNode::from(node);
+        node.mark_as_leaf();
+        assert_eq!(node.is_leaf_and_child_pointer, 1 << 31);
 
-        assert_eq!(
-            raw_node.is_leaf_and_child_pointer,
-            0b10000000000000000000000000000101
-        );
+        node.set_child_pointer(33);
+        assert_eq!(node.is_leaf_and_child_pointer, (1 << 31) | 33);
 
-        assert_eq!(raw_node.child_mask_high, 0xFF000000);
-        assert_eq!(raw_node.child_mask_low, 0xFFFFFFFF);
+        node.mark_child_active(3);
+        assert_eq!(node.child_mask_high, 0);
+        assert_eq!(node.child_mask_low, 0b1000);
+
+        assert!(node.has_children());
     }
 }
