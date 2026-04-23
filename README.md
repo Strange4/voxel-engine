@@ -27,21 +27,21 @@ Starting the window, the engine and then looking at frame time is not a great id
 There are two options that present ourselves that have various pros and cons:
 
 1. Create my own benchmarker
-    - Pros:
-        - Don't have to rewrite code
-        - Can view the tests while they are running!
-        - Creating a benchmarking app would be kinda cool
-    - Cons:
-        - Would have to transform the Application part of the code into having a whole benchmarking suite
+   - Pros:
+     - Don't have to rewrite code
+     - Can view the tests while they are running!
+     - Creating a benchmarking app would be kinda cool
+   - Cons:
+     - Would have to transform the Application part of the code into having a whole benchmarking suite
 2. Use an external library
-    - Pros:
-        - Don't have to write an entire library to benchmark
-        - Could use cirterion that can use statistics, plots and "more rigorous" benchmarking
-        - Would decouple the code into making the entire engine run as a headless application rendering to an image
-        - The benchmarking part of the engine would be decoupled from the application
-        - Running benchmarks would be less tedious
-    - Cons:
-        - Rewriting a lot of code
+   - Pros:
+     - Don't have to write an entire library to benchmark
+     - Could use cirterion that can use statistics, plots and "more rigorous" benchmarking
+     - Would decouple the code into making the entire engine run as a headless application rendering to an image
+     - The benchmarking part of the engine would be decoupled from the application
+     - Running benchmarks would be less tedious
+   - Cons:
+     - Rewriting a lot of code
 
 #### Precomputing camera viewport
 
@@ -138,11 +138,12 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 - [Voxel Cone tracing but better](https://jose-villegas.github.io/post/deferred_voxel_shading/)
 - [Better than cone tracing?](https://onlinelibrary.wiley.com/doi/10.1111/cgf.15262)
 - [Creating 64 trees for traversal](https://dubiousconst282.github.io/2024/10/03/voxel-ray-tracing/)
+- [Vulkan GPU Info](https://vulkan.gpuinfo.org/)
 
 - Fractals
-    - https://natureofcode.com/fractals/
-    - https://www.skytopia.com/project/fractal/mandelbulb.html
-    - https://iquilezles.org/articles/mandelbulb/
+  - https://natureofcode.com/fractals/
+  - https://www.skytopia.com/project/fractal/mandelbulb.html
+  - https://iquilezles.org/articles/mandelbulb/
 
 # How to?
 
@@ -157,8 +158,8 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 ### Use renderdoc
 
--   1. Make sure you run with the command environment variable set to `WAYLAND_DISPLAY= XDG_SESSION_TYPE=x11 ./qrenderdoc`
--   2. Run and use renderdoc
+- 1. Make sure you run with the command environment variable set to `WAYLAND_DISPLAY= XDG_SESSION_TYPE=x11 ./qrenderdoc`
+- 2. Run and use renderdoc
 
 # Build requirements on windows
 
