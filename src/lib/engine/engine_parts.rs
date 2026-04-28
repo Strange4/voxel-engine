@@ -1,8 +1,12 @@
 use std::sync::Arc;
-
 use vulkano::{
+    buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
     command_buffer::allocator::StandardCommandBufferAllocator,
     device::{Device, Queue, physical::PhysicalDevice},
+    memory::allocator::{
+        AllocationCreateInfo, GenericMemoryAllocatorCreateInfo, MemoryTypeFilter,
+        StandardMemoryAllocator,
+    },
     pipeline::{
         ComputePipeline, PipelineLayout, PipelineShaderStageCreateInfo,
         compute::ComputePipelineCreateInfo, layout::PipelineDescriptorSetLayoutCreateInfo,
@@ -14,6 +18,8 @@ use vulkano::{
 use crate::{
     camera::Camera,
     engine::{compute_shader, push_constants::PushConstants},
+    svt::{Svt, SvtNode},
+    voxel_data::XYZIVoxelData,
 };
 
 pub struct EngineParts {
@@ -35,12 +41,15 @@ pub struct EngineParts {
     // for timings
     pub query_pool: Arc<QueryPool>,
     pub timestamp_period: f64,
+
+    pub model_data: ModelData,
 }
 
 impl EngineParts {
     /// please input the TOTAL number_of_queries that the query pool can have
     /// If you have a swapchain and each image does a query, multiply them
     pub fn new(
+        model_data: ModelData,
         camera: Camera,
         output_image_size: [u32; 2],
         physical_device: &Arc<PhysicalDevice>,
@@ -49,7 +58,12 @@ impl EngineParts {
         query_count: u32,
     ) -> EngineParts {
         let default_shader_flags = 0;
-        let push_contants = PushConstants::new(&output_image_size, &camera, default_shader_flags);
+        let push_contants = PushConstants::new(
+            &output_image_size,
+            &camera,
+            default_shader_flags,
+            model_data.model_scale,
+        );
 
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
             device.clone(),
@@ -78,6 +92,7 @@ impl EngineParts {
             query_pool,
             timestamp_period: physical_device.properties().timestamp_period as f64,
             image_size: output_image_size,
+            model_data,
         }
     }
 
@@ -100,5 +115,72 @@ impl EngineParts {
             ComputePipelineCreateInfo::stage_layout(stage, layout),
         )
         .unwrap()
+    }
+}
+
+pub struct ModelData {
+    pub nodes: Subbuffer<[SvtNode]>,
+    pub leaf_data: Subbuffer<[u8]>,
+    pub color_palette: Subbuffer<[u32]>,
+    pub model_scale: u8,
+}
+
+impl ModelData {
+    pub fn new_from_vox_data(device: Arc<Device>, mut voxel_data: XYZIVoxelData) -> Self {
+        let allocator = Arc::new(StandardMemoryAllocator::new_default(device));
+        let svt = Svt::from_voxel_data(&mut voxel_data);
+        let color_palette = voxel_data.color_palette();
+
+        let nodes_buffer = Buffer::from_iter(
+            allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::STORAGE_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            svt.node_pool.into_iter(),
+        )
+        .expect("Couldn't create buffer");
+
+        let leaf_data_buffer = Buffer::from_iter(
+            allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::STORAGE_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            svt.leaf_data.into_iter(),
+        )
+        .expect("Couldn't create buffer");
+
+        let color_palette_buffer = Buffer::from_iter(
+            allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::UNIFORM_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            color_palette,
+        )
+        .expect("Couldn't create buffer");
+
+        Self {
+            nodes: nodes_buffer,
+            leaf_data: leaf_data_buffer,
+            color_palette: color_palette_buffer,
+            model_scale: svt.scale,
+        }
     }
 }

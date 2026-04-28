@@ -1,16 +1,12 @@
 # TODO
 
-### Make every constant value adjustable through the UI
-
-- Rendering size in pixels (like 1920x1080): You should use a multiplier of the screen size and show the resolution in the slider text
+### Implement 64 tree traversal in the compute shader
 
 ### START RAY TRACING!!!
 
 Should probably add turn on and off features in the ui so that I can see the performance and visual difference.
 
 ### Add focal blur setting
-
-### use sparse voxel octrees in traversal and storage
 
 ### Load multiple models from the same .vox file
 
@@ -139,11 +135,10 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 - [Better than cone tracing?](https://onlinelibrary.wiley.com/doi/10.1111/cgf.15262)
 - [Creating 64 trees for traversal](https://dubiousconst282.github.io/2024/10/03/voxel-ray-tracing/)
 - [Vulkan GPU Info](https://vulkan.gpuinfo.org/)
-
-- Fractals
-  - https://natureofcode.com/fractals/
-  - https://www.skytopia.com/project/fractal/mandelbulb.html
-  - https://iquilezles.org/articles/mandelbulb/
+- [Explanation of 3d dda algorithm](https://www.youtube.com/watch?v=ztkh1r1ioZo)
+- [GLSL functions](https://docs.gl/)
+- [Slab intersection visualizer](https://www.mathematik.uni-marburg.de/~thormae/lectures/graphics2/graphics_2_2_eng_web.html#20)
+- [Unitiy builds for shader includes](https://austinmorlan.com/posts/unity_jumbo_build/): I'm not sure if it would benefit for compiling performance. But it really reduces the headache to import and see what is defined. + I don't need #ifndef and more macros.
 
 # How to?
 

@@ -1,4 +1,5 @@
 vulkano_shaders::shader! {
     ty: "compute",
-    path: "shaders/main.comp"
+    generate_structs: false,
+    path: "shaders/main.comp",
 }

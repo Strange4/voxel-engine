@@ -306,7 +306,7 @@ impl TryInto<RGBAChunk> for &VoxChunk {
             .chunks_exact(bytes_per_color)
             .map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap()))
             .collect();
-        // need to remap the palletes: https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt
+        // need to remap the palettes: https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt
         rgba_palette.insert(0, 0);
         rgba_palette.pop();
         Ok(RGBAChunk {

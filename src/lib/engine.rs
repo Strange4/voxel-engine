@@ -6,25 +6,18 @@ use egui_winit_vulkano::{Gui, GuiConfig};
 use glam::{Vec3, vec3};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
-use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
-    CopyBufferToImageInfo, PrimaryAutoCommandBuffer,
+    PrimaryAutoCommandBuffer,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::layout::DescriptorSetLayout;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
-use vulkano::device::{Device, Queue};
 use vulkano::format::Format;
 use vulkano::image::view::{ImageView, ImageViewCreateInfo};
 use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
-use vulkano::memory::allocator::{
-    AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryTypeFilter,
-    StandardMemoryAllocator,
-};
-use vulkano::pipeline::{ComputePipeline, Pipeline, PipelineBindPoint};
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
+use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 use vulkano::query::QueryPool;
 use vulkano::swapchain::{
     self, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo,
@@ -37,7 +30,8 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
 use crate::camera::Camera;
-use crate::engine::engine_parts::EngineParts;
+use crate::engine::engine_parts::{EngineParts, ModelData};
+use crate::engine::push_constants::PushConstants;
 use crate::voxel_data::XYZIVoxelData;
 use crate::voxel_loader::VoxFile;
 use crate::vulkan::starter::{
@@ -45,8 +39,6 @@ use crate::vulkan::starter::{
     get_physical_device_and_family_index, get_physical_device_and_family_index_for_surface,
     get_swapchain, get_windowed_instance,
 };
-
-use crate::engine::push_constants::PushConstants;
 use crate::vulkan::timings::get_query_timings;
 
 type SwapchainFenceFuture = Arc<FenceSignalFuture<swapchain::PresentFuture<Box<dyn GpuFuture>>>>;
@@ -100,7 +92,133 @@ impl<T> Engine<T> {
             &self.engine_parts.image_size,
             &self.engine_parts.camera,
             self.engine_parts.shader_flags,
+            self.engine_parts.model_data.model_scale,
         );
+    }
+
+    /// Creates a new command buffer that:
+    /// - resets the queries and creates 2 new timings if `should_write_timestamp` is true
+    /// - dispatches the shader
+    fn create_draw_to_image_command_buffer(
+        // push_constants: PushConstants,
+        descriptor_set: Arc<DescriptorSet>,
+        // allocator: Arc<StandardCommandBufferAllocator>,
+        output_image: &Arc<Image>,
+        engine_parts: &EngineParts,
+        // queue: &Arc<Queue>,
+        // pipeline: Arc<ComputePipeline>,
+        // query_pool: &Arc<QueryPool>,
+        should_write_timestamp: bool,
+        timestamp_index: u32,
+    ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
+        let allocator = engine_parts.command_buffer_allocator.clone();
+        let pipeline = engine_parts.compute_pipeline.clone();
+        let mut builder = AutoCommandBufferBuilder::primary(
+            allocator,
+            engine_parts.queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+        let pipeline_layout = pipeline.layout().clone();
+        let query_pool = &engine_parts.query_pool;
+
+        builder
+            .bind_pipeline_compute(pipeline)
+            .unwrap()
+            .push_constants(pipeline_layout.clone(), 0, engine_parts.push_contants)
+            .unwrap()
+            .bind_descriptor_sets(
+                PipelineBindPoint::Compute,
+                pipeline_layout.clone(),
+                0,
+                descriptor_set,
+            )
+            .unwrap();
+
+        if should_write_timestamp {
+            // safety: this the queries are not used in any other command buffer since there is no other command buffer
+            unsafe {
+                builder
+                    .reset_query_pool(
+                        query_pool.clone(),
+                        timestamp_index..timestamp_index + MAX_TIMESTAMP_QUERIES_PER_IMAGE,
+                    )
+                    .unwrap()
+                    .write_timestamp(
+                        query_pool.clone(),
+                        timestamp_index,
+                        PipelineStage::TopOfPipe,
+                    )
+                    .unwrap();
+            }
+        }
+
+        let extent = output_image.extent();
+        let local_size_in_shader = 16;
+
+        // The safety requirements are verifiable since only one descriptor set is given
+        unsafe {
+            builder
+                .dispatch([
+                    extent[0].div_ceil(local_size_in_shader),
+                    extent[1].div_ceil(local_size_in_shader),
+                    1,
+                ])
+                .unwrap();
+        }
+
+        unsafe {
+            builder
+                .write_timestamp(
+                    query_pool.clone(),
+                    timestamp_index + 1,
+                    PipelineStage::BottomOfPipe,
+                )
+                .unwrap();
+        }
+
+        builder
+    }
+
+    /// Creates the descriptor set of image views that are used by the shader. Also creates the output images that are written into by the shader
+    fn create_descriptor_set_and_output_image(
+        output_image_extent: &[u32; 2],
+        model_data: &ModelData,
+        allocator: Arc<StandardMemoryAllocator>,
+        descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
+        descriptor_set_layout: Arc<DescriptorSetLayout>,
+    ) -> (Arc<DescriptorSet>, Arc<Image>) {
+        let output_image = Image::new(
+            allocator,
+            ImageCreateInfo {
+                format: Format::R8G8B8A8_UNORM,
+                extent: [output_image_extent[0], output_image_extent[1], 1],
+                image_type: ImageType::Dim2d,
+                usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let output_image_view = ImageView::new_default(output_image.clone()).unwrap();
+        let descriptor_set = DescriptorSet::new(
+            descriptor_set_allocator,
+            descriptor_set_layout,
+            [
+                WriteDescriptorSet::image_view(0, output_image_view.clone()),
+                WriteDescriptorSet::buffer(1, model_data.nodes.clone()),
+                WriteDescriptorSet::buffer(2, model_data.leaf_data.clone()),
+                WriteDescriptorSet::buffer(3, model_data.color_palette.clone()),
+            ],
+            [],
+        )
+        .unwrap();
+
+        (descriptor_set, output_image)
     }
 }
 
@@ -169,7 +287,13 @@ impl HeadlessEngine {
         let (device, queue) =
             get_headless_device_and_queue(physical_device.clone(), queue_family_index);
 
+        let voxel_data = XYZIVoxelData::from_vox_file(
+            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
+        )
+        .unwrap();
+
         let engine_parts = EngineParts::new(
+            ModelData::new_from_vox_data(device.clone(), voxel_data),
             Camera::default(),
             output_image_size,
             &physical_device,
@@ -209,14 +333,15 @@ impl HeadlessEngine {
             }
         };
 
-        let command_buffer = create_draw_to_image_command_buffer(
-            engine_parts.push_contants,
+        let command_buffer = Engine::<Self>::create_draw_to_image_command_buffer(
+            // engine_parts.push_contants,
             self.descriptor_set.clone(),
-            engine_parts.command_buffer_allocator.clone(),
+            // engine_parts.command_buffer_allocator.clone(),
             &self.output_image,
-            &engine_parts.queue,
-            engine_parts.compute_pipeline.clone(),
-            &engine_parts.query_pool,
+            &engine_parts,
+            // &engine_parts.queue,
+            // engine_parts.compute_pipeline.clone(),
+            // &engine_parts.query_pool,
             true,
             0,
         )
@@ -266,17 +391,9 @@ impl HeadlessEngine {
             engine_parts.device.clone(),
         ));
 
-        let model = create_model_and_fill(
-            engine_parts.device.clone(),
-            allocator.clone(),
-            engine_parts.command_buffer_allocator.clone(),
-            engine_parts.queue.clone(),
-        );
-
-        let model_image_view = ImageView::new_default(model).unwrap();
-        get_descriptor_set_and_output_image(
+        Engine::<Self>::create_descriptor_set_and_output_image(
             image_size,
-            model_image_view,
+            &engine_parts.model_data,
             allocator,
             descriptor_set_allocator,
             descriptor_set_layout.clone(),
@@ -303,8 +420,13 @@ impl WindowedEngine {
             surface.clone(),
             window.inner_size().into(),
         );
+        let voxel_data = XYZIVoxelData::from_vox_file(
+            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
+        )
+        .unwrap();
 
         let engine_parts = EngineParts::new(
+            ModelData::new_from_vox_data(device.clone(), voxel_data),
             Camera::default(),
             resolution,
             &physical_device,
@@ -389,17 +511,18 @@ impl WindowedEngine {
             Some(fence) => fence.boxed(),
         };
 
-        let command_buffer = create_draw_to_swapchain_command_buffer(
-            engine_parts.push_contants,
+        let command_buffer = Self::create_draw_to_swapchain_command_buffer(
+            // engine_parts.push_contants,
             self.descriptor_sets[swap_image_index as usize].clone(),
-            engine_parts.command_buffer_allocator.clone(),
+            // engine_parts.command_buffer_allocator.clone(),
             self.present_images_and_views[swap_image_index as usize]
                 .0
                 .clone(),
             self.output_images[swap_image_index as usize].clone(),
-            &engine_parts.queue,
-            engine_parts.compute_pipeline.clone(),
-            engine_parts.query_pool.clone(),
+            engine_parts,
+            // &engine_parts.queue,
+            // engine_parts.compute_pipeline.clone(),
+            // engine_parts.query_pool.clone(),
             swap_image_index,
             self.should_record[swap_image_index as usize],
         );
@@ -487,6 +610,7 @@ impl WindowedEngine {
             &engine_parts.image_size,
             &engine_parts.camera,
             engine_parts.shader_flags,
+            engine_parts.model_data.model_scale,
         );
     }
 
@@ -537,30 +661,18 @@ impl WindowedEngine {
             engine_parts.device.clone(),
             Default::default(),
         ));
-        let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
-            engine_parts.device.clone(),
-            Default::default(),
-        ));
 
         let allocator = Arc::new(StandardMemoryAllocator::new_default(
             engine_parts.device.clone(),
         ));
 
-        let model = create_model_and_fill(
-            engine_parts.device.clone(),
-            allocator.clone(),
-            command_buffer_allocator,
-            engine_parts.queue.clone(),
-        );
-
-        let model_image_view = ImageView::new_default(model).unwrap();
-
         let mut descriptor_sets = Vec::new();
         let mut output_images = Vec::new();
+
         for _ in 0..number_of_present_images {
-            let (descriptor_set, image) = get_descriptor_set_and_output_image(
+            let (descriptor_set, image) = Engine::<Self>::create_descriptor_set_and_output_image(
                 &engine_parts.image_size,
-                model_image_view.clone(),
+                &engine_parts.model_data,
                 allocator.clone(),
                 descriptor_set_allocator.clone(),
                 descriptor_set_layout.clone(),
@@ -588,232 +700,53 @@ impl WindowedEngine {
             })
             .collect()
     }
-}
 
-// Gets the command buffer for a single dispatch of the compute shader.
-// This is done so that we can modify the push constants every frame.
-fn create_draw_to_swapchain_command_buffer(
-    push_constants: PushConstants,
-    descriptor_set: Arc<DescriptorSet>,
-    allocator: Arc<StandardCommandBufferAllocator>,
-    present_image: Arc<Image>,
-    output_image: Arc<Image>,
-    queue: &Arc<Queue>,
-    pipeline: Arc<ComputePipeline>,
-    query_pool: Arc<QueryPool>,
-    swapchain_index: u32,
-    should_write_timestamp: bool,
-) -> Arc<PrimaryAutoCommandBuffer> {
-    let timestamp_index = swapchain_index * MAX_TIMESTAMP_QUERIES_PER_IMAGE;
+    // Gets the command buffer for a single dispatch of the compute shader.
+    // This is done so that we can modify the push constants every frame.
+    fn create_draw_to_swapchain_command_buffer(
+        // push_constants: PushConstants,
+        descriptor_set: Arc<DescriptorSet>,
+        // allocator: Arc<StandardCommandBufferAllocator>,
+        present_image: Arc<Image>,
+        output_image: Arc<Image>,
+        engine_parts: &EngineParts,
+        // queue: &Arc<Queue>,
+        // pipeline: Arc<ComputePipeline>,
+        // query_pool: Arc<QueryPool>,
+        swapchain_index: u32,
+        should_write_timestamp: bool,
+    ) -> Arc<PrimaryAutoCommandBuffer> {
+        let timestamp_index = swapchain_index * MAX_TIMESTAMP_QUERIES_PER_IMAGE;
 
-    let mut builder = create_draw_to_image_command_buffer(
-        push_constants,
-        descriptor_set,
-        allocator,
-        &output_image,
-        queue,
-        pipeline,
-        &query_pool,
-        should_write_timestamp,
-        timestamp_index,
-    );
-    builder
-        .blit_image(BlitImageInfo::images(output_image, present_image))
-        .unwrap();
-
-    unsafe {
-        // the query pool was reset in the previous function
-        builder
-            .write_timestamp(
-                query_pool.clone(),
-                timestamp_index + 2,
-                PipelineStage::TopOfPipe,
-            )
-            .unwrap();
-    }
-
-    builder.build().unwrap()
-}
-
-/// Creates a new command buffer that:
-/// - resets the queries and creates 2 new timings if `should_write_timestamp` is true
-/// - dispatches the shader
-fn create_draw_to_image_command_buffer(
-    push_constants: PushConstants,
-    descriptor_set: Arc<DescriptorSet>,
-    allocator: Arc<StandardCommandBufferAllocator>,
-    output_image: &Arc<Image>,
-    queue: &Arc<Queue>,
-    pipeline: Arc<ComputePipeline>,
-    query_pool: &Arc<QueryPool>,
-    should_write_timestamp: bool,
-    timestamp_index: u32,
-) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
-    let mut builder = AutoCommandBufferBuilder::primary(
-        allocator,
-        queue.queue_family_index(),
-        CommandBufferUsage::OneTimeSubmit,
-    )
-    .unwrap();
-    let pipeline_layout = pipeline.layout();
-
-    builder
-        .bind_pipeline_compute(pipeline.clone())
-        .unwrap()
-        .push_constants(pipeline_layout.clone(), 0, push_constants)
-        .unwrap()
-        .bind_descriptor_sets(
-            PipelineBindPoint::Compute,
-            pipeline_layout.clone(),
-            0,
+        let mut builder = Engine::<Self>::create_draw_to_image_command_buffer(
+            // push_constants,
             descriptor_set,
-        )
-        .unwrap();
+            // allocator,
+            &output_image,
+            engine_parts,
+            // queue,
+            // pipeline,
+            // &query_pool,
+            should_write_timestamp,
+            timestamp_index,
+        );
+        builder
+            .blit_image(BlitImageInfo::images(output_image, present_image))
+            .unwrap();
 
-    if should_write_timestamp {
-        // safety: this the queries are not used in any other command buffer since there is no other command buffer
         unsafe {
+            // the query pool was reset in the previous function
             builder
-                .reset_query_pool(
-                    query_pool.clone(),
-                    timestamp_index..timestamp_index + MAX_TIMESTAMP_QUERIES_PER_IMAGE,
-                )
-                .unwrap()
                 .write_timestamp(
-                    query_pool.clone(),
-                    timestamp_index,
+                    engine_parts.query_pool.clone(),
+                    timestamp_index + 2,
                     PipelineStage::TopOfPipe,
                 )
                 .unwrap();
         }
+
+        builder.build().unwrap()
     }
-
-    let extent = output_image.extent();
-    let local_size_in_shader = 16;
-
-    // The safety requirements are verifiable since only one descriptor set is given
-    unsafe {
-        builder
-            .dispatch([
-                extent[0].div_ceil(local_size_in_shader),
-                extent[1].div_ceil(local_size_in_shader),
-                1,
-            ])
-            .unwrap();
-    }
-
-    unsafe {
-        builder
-            .write_timestamp(
-                query_pool.clone(),
-                timestamp_index + 1,
-                PipelineStage::BottomOfPipe,
-            )
-            .unwrap();
-    }
-
-    builder
-}
-
-/// Creates the descriptor set of image views that are used by the shader. Also creates the output images that are written into by the shader
-fn get_descriptor_set_and_output_image(
-    output_image_extent: &[u32; 2],
-    model_image_view: Arc<ImageView>,
-    allocator: Arc<StandardMemoryAllocator>,
-    descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
-    descriptor_set_layout: Arc<DescriptorSetLayout>,
-) -> (Arc<DescriptorSet>, Arc<Image>) {
-    let output_image = Image::new(
-        allocator,
-        ImageCreateInfo {
-            format: Format::R8G8B8A8_UNORM,
-            extent: [output_image_extent[0], output_image_extent[1], 1],
-            image_type: ImageType::Dim2d,
-            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_SRC,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-
-    let output_image_view = ImageView::new_default(output_image.clone()).unwrap();
-    let descriptor_set = DescriptorSet::new(
-        descriptor_set_allocator,
-        descriptor_set_layout,
-        [
-            WriteDescriptorSet::image_view(0, output_image_view.clone()),
-            WriteDescriptorSet::image_view(1, model_image_view.clone()),
-        ],
-        [],
-    )
-    .unwrap();
-
-    (descriptor_set, output_image)
-}
-
-// TODO: make this more generic to load the model from whatever voxel data
-fn create_model_and_fill(
-    device: Arc<Device>,
-    allocator: Arc<GenericMemoryAllocator<FreeListAllocator>>,
-    command_buffer_allocator: Arc<StandardCommandBufferAllocator>,
-    queue: Arc<Queue>,
-) -> Arc<Image> {
-    let vox_file = VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap();
-    let mut voxel_data = XYZIVoxelData::from_vox_file(vox_file).unwrap();
-    let size = voxel_data.size();
-    let extent = [size.x, size.y, size.z];
-    let image = Image::new(
-        allocator.clone(),
-        ImageCreateInfo {
-            image_type: ImageType::Dim3d,
-            format: Format::R8G8B8A8_UNORM,
-            extent,
-            usage: ImageUsage::SAMPLED | ImageUsage::STORAGE | ImageUsage::TRANSFER_DST,
-            ..Default::default()
-        },
-        AllocationCreateInfo::default(),
-    )
-    .unwrap();
-
-    let buffer = Buffer::from_iter(
-        allocator.clone(),
-        BufferCreateInfo {
-            usage: BufferUsage::TRANSFER_SRC | BufferUsage::STORAGE_BUFFER,
-            ..Default::default()
-        },
-        AllocationCreateInfo {
-            memory_type_filter: MemoryTypeFilter::PREFER_HOST
-                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-            ..Default::default()
-        },
-        voxel_data.as_rgba_bytes(),
-    )
-    .expect("Couldn't create buffer");
-
-    let mut builder = AutoCommandBufferBuilder::primary(
-        command_buffer_allocator,
-        queue.queue_family_index(),
-        CommandBufferUsage::OneTimeSubmit,
-    )
-    .unwrap();
-
-    builder
-        .copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(buffer, image.clone()))
-        .unwrap();
-
-    let command_buffer = builder.build().unwrap();
-
-    sync::now(device.clone())
-        .then_execute(queue.clone(), command_buffer)
-        .unwrap()
-        .then_signal_fence_and_flush()
-        .unwrap()
-        .wait(Some(Duration::from_secs(3)))
-        .unwrap();
-    image
 }
 
 fn get_sphere_model(cube_side_length: u32) -> Vec<u8> {

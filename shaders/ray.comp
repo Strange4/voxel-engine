@@ -7,3 +7,27 @@ struct AABB {
     vec3 minPos;
     vec3 size;
 };
+
+Ray generate_ray(PushConstants push_constants) {
+    // TODO: generate this with a matrix instead: https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-generating-camera-rays/generating-camera-rays.html
+    // If you generate a matrix you can just pass the matrix to this function instead of all the push constants
+    vec3 top_left_pixel = push_constants.top_left_pixel;
+    vec3 pixel_delta_right = push_constants.pixel_delta_right;
+    vec3 pixel_delta_down = push_constants.pixel_delta_down;
+    vec3 camera_center = vec3(push_constants.camera_x, push_constants.camera_y, push_constants.camera_z);
+    vec3 pixelCenter = top_left_pixel + gl_GlobalInvocationID.x * pixel_delta_right + gl_GlobalInvocationID.y * pixel_delta_down;
+    vec3 rayDirection = normalize(pixelCenter - camera_center);
+    Ray ray = Ray(camera_center, rayDirection);
+    return ray;
+}
+
+vec2 intersectAABB(Ray ray, AABB aabb) {
+    vec3 inverse = 1 / ray.direction;
+    vec3 t_min = (aabb.minPos - ray.origin) * inverse;
+    vec3 t_max = (aabb.minPos + aabb.size - ray.origin) * inverse;
+    vec3 t1 = min(t_min, t_max);
+    vec3 t2 = max(t_min, t_max);
+    float t_near = max(max(t1.x, t1.y), t1.z);
+    float t_far = min(min(t2.x, t2.y), t2.z);
+    return vec2(t_near, t_far);
+}

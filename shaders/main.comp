@@ -2,38 +2,15 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "svt.comp"
+#include "shader_inputs.comp"
 #include "ray.comp"
-
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
-
-layout(set = 0, binding = 0, rgba8) uniform image2D out_image;
-layout(set = 0, binding = 1, rgba8) uniform image3D model;
-
-// we use vec4's for alignment because vec3's get padded anyway
-layout(push_constant) uniform PushConstants {
-    vec3 top_left_pixel;
-    float camera_x;
-    vec3 pixel_delta_right;
-    float camera_y;
-    vec3 pixel_delta_down;
-    float camera_z;
-    uint shader_flags;
-} push_constants;
+#include "traversal.comp"
 
 vec4 getVoxelAtCoord(vec3 coord, AABB aabb) {
     ivec3 voxelCoord = ivec3(coord - aabb.minPos);
-    return imageLoad(model, voxelCoord);
-}
-
-vec2 intersection(Ray ray, AABB aabb) {
-    vec3 inverse = 1 / ray.direction;
-    vec3 t_min = (aabb.minPos - ray.origin) * inverse;
-    vec3 t_max = (aabb.minPos + aabb.size - ray.origin) * inverse;
-    vec3 t1 = min(t_min, t_max);
-    vec3 t2 = max(t_min, t_max);
-    float t_near = max(max(t1.x, t1.y), t1.z);
-    float t_far = min(min(t2.x, t2.y), t2.z);
-    return vec2(t_near, t_far);
+    return vec4(0);
+    // return imageLoad(model, voxelCoord);
 }
 
 bool pointIsInsideBox(vec3 point, AABB box) {
@@ -95,10 +72,11 @@ vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb, bool show_steps) {
 }
 
 vec4 rayColor(Ray ray, bool show_steps) {
-    vec3 modelSize = vec3(imageSize(model));
+    // vec3 modelSize = vec3(imageSize(model));
+    vec3 modelSize = vec3(0);
     vec3 modelPosition = modelSize * -0.5;
     AABB aabb = AABB(modelPosition, modelSize);
-    vec2 tMinMax = intersection(ray, aabb);
+    vec2 tMinMax = intersectAABB(ray, aabb);
     float tMin = tMinMax.x;
     float tMax = tMinMax.y;
     if (tMin >= tMax || tMax < 0) {
@@ -110,16 +88,19 @@ vec4 rayColor(Ray ray, bool show_steps) {
 void main() {
     vec2 imgSize = vec2(imageSize(out_image));
     if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
-    vec3 top_left_pixel = push_constants.top_left_pixel.xyz;
-    vec3 pixel_delta_right = push_constants.pixel_delta_right.xyz;
-    vec3 pixel_delta_down = push_constants.pixel_delta_down.xyz;
-    vec3 camera_center = vec3(push_constants.camera_x, push_constants.camera_y, push_constants.camera_z);
+
+    Ray ray = generate_ray(push_constants);
     bool show_steps = bool(push_constants.shader_flags & 1);
 
-    vec3 pixelCenter = top_left_pixel + gl_GlobalInvocationID.x * pixel_delta_right + gl_GlobalInvocationID.y * pixel_delta_down;
-    vec3 rayDirection = normalize(pixelCenter - camera_center);
-    Ray ray = Ray(camera_center, rayDirection);
+    HitInfo hit = traverse_scene(ray);
+    // TODO: make the color the number of steps taken if the show steps variable is on
+    // And make it a cool color scheme
 
-    vec4 color = rayColor(ray, show_steps);
+    vec4 color;
+    if (hit.hit) {
+        color = color_palette.palette[hit.palette_index];
+    } else {
+        color = vec4(vec3(0.156862745).xyz, 1);
+    }
     imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), color);
 }

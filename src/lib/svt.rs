@@ -67,12 +67,13 @@ impl SvtNode {
 pub struct Svt {
     pub node_pool: Vec<SvtNode>,
     pub leaf_data: Vec<u8>,
+    pub scale: u8,
 }
 
 impl Svt {
     /// Creates a Sparse Voxel Tree representation of the voxel data.
     pub fn from_voxel_data(voxel_data: &mut XYZIVoxelData) -> Self {
-        let data = voxel_data.as_pallete_indices();
+        let data = voxel_data.as_palette_indices();
         let size = voxel_data.size();
         Self::build_tree(size, &data)
     }
@@ -85,6 +86,8 @@ impl Svt {
         // We have to make the tree as big as the max side of the model.
         // What is the height of the tree with 4 children at each level and n number of children?
         let scale = (model_size.max_element() - 1).ilog(4) + 1; // Same as log(x as f32, base = 4.0).ceil();
+
+        assert!(scale <= 11);
 
         let root = Self::build_tree_recursive(
             &mut node_pool,
@@ -100,6 +103,7 @@ impl Svt {
         Self {
             node_pool,
             leaf_data,
+            scale: scale as u8, // This won't be more than 16 since the max width of a model is 2^32
         }
     }
 

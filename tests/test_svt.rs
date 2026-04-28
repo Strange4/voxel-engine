@@ -60,11 +60,11 @@ fn test_build_tree_level2() {
         VoxFile::load_vox_file(Path::new("models/tests/8 green corner cube.vox")).unwrap();
     let mut voxel_data = XYZIVoxelData::from_vox_file(vox_file).unwrap();
     let tree = Svt::from_voxel_data(&mut voxel_data);
-    let color_pallete: &[u32; 256] = voxel_data.color_pallete();
+    let color_palette = voxel_data.color_palette();
 
     // There's 8 voxels in this file
     assert_eq!(tree.leaf_data.len(), 8);
-    assert_eq!(color_pallete[tree.leaf_data[0] as usize], 0x00_FF_00_FF);
+    assert_eq!(color_palette[tree.leaf_data[0] as usize], 0x00_FF_00_FF);
 
     // Since the model is 16^3, there should only be two levels
     // and because there are only 8 voxels in level 1, the total number of nodes should be 8 + 1 (top level)

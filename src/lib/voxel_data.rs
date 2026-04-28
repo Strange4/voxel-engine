@@ -104,10 +104,10 @@ impl XYZIVoxelData {
         bytes
     }
 
-    /// Consumes the voxel data and creates a 3d representation of the collor pallete indices.
+    /// Consumes the voxel data and creates a 3d representation of the collor palette indices.
     /// The vox XYZ coordinates are mapped to Vulkan NDC
     /// The bytes are filled in the x, y, z order
-    pub fn as_pallete_indices(&mut self) -> Vec<u8> {
+    pub fn as_palette_indices(&mut self) -> Vec<u8> {
         let (x_size, y_size, z_size) = (
             self.size.x as usize,
             self.size.y as usize,
@@ -138,7 +138,7 @@ impl XYZIVoxelData {
         &self.size
     }
 
-    pub fn color_pallete(&self) -> &[u32; 256] {
-        &self.color_palette
+    pub fn color_palette(self) -> [u32; 256] {
+        self.color_palette
     }
 }

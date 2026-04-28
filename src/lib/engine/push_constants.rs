@@ -17,10 +17,11 @@ pub struct PushConstants {
     pixel_delta_down: Vec3,
     camera_z: f32,
     shader_flags: u8,
+    model_scale: u8,
 }
 
 impl PushConstants {
-    pub fn new(image_size: &[u32; 2], camera: &Camera, shader_flags: u8) -> Self {
+    pub fn new(image_size: &[u32; 2], camera: &Camera, shader_flags: u8, model_scale: u8) -> Self {
         let up_vector: Vec3 = camera.up;
         let image_width = image_size[0] as f32;
         let image_height = image_size[1] as f32;
@@ -56,6 +57,7 @@ impl PushConstants {
             camera_y: camera_center.y,
             camera_z: camera_center.z,
             shader_flags,
+            model_scale,
         }
     }
 }

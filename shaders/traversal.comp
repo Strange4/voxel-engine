@@ -1,0 +1,193 @@
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+struct HitInfo {
+    uint number_of_steps;
+    bool hit;
+    uint palette_index;
+    vec3 normal;
+    vec3 position;
+};
+
+/// Gets the index of the node [0..64] given the position and the scale
+uint get_node_index(vec3 position, uint scale) {
+    uvec3 cell_position = floatBitsToUint(position) >> scale & 3;
+    // Same as x + y * 4 + z * 16
+    return cell_position.x + cell_position.y >> 2 + cell_position.z >> 4;
+}
+
+/// Clears the bits bellow the scale
+/// Same as floor(position / scale) * scale
+vec3 clear_bellow_scale(vec3 position, uint scale) {
+    uint mask = (~0) << scale; // only keep the bits above or equal to the scale
+    return uintBitsToFloat(floatBitsToUint(position) & mask);
+}
+
+/// Count number of set bits in variable range [0..width)
+uint count_ones_until(uint64_t mask, uint width) {
+    // same as count_ones(mask & ((1ull << mask) - 1));
+    uint himask = uint(mask);
+    uint count = 0;
+
+    if (width >= 32) {
+        count = bitCount(himask);
+        himask = uint(mask >> 32);
+    }
+    uint m = 1 << (width & 31);
+    count += bitCount(himask & (m - 1));
+
+    return count;
+}
+
+HitInfo traverse_scene(Ray ray) {
+    uint stack[11];
+
+    uint node_index = 0; // root node is at 0
+    SvtNode node = svt.nodes[node_index];
+
+    uint scale = 21; // 21's bit in ieee floating point is 0.25
+    vec3 position = clamp(ray.origin, 1.0, 1.9999999); // We defined that our model is encompased between [1.0...2.0)
+    vec3 inverse_direction = 1 / ray.direction;
+
+    uint max_steps = 256; // The actual max steps could be 2^22 which is the entire width of the model. But we'll cap it for now
+    uint step_count = 0;
+    for (step_count = 0; step_count < max_steps; step_count++) {
+        uint64_t node_child_mask = get_child_mask(node);
+        bool node_is_leaf = is_leaf(node);
+        uint child_index = get_node_index(position, scale);
+        bool node_has_child = has_child(node_child_mask, child_index);
+
+        while (!node_is_leaf && node_has_child) {
+            // Save our parent in the stack
+            stack[scale >> 1] = node_index;
+
+            // Go deeper
+            uint child_offset = count_ones_until(node_child_mask, child_index);
+            uint child_pointer = get_child_pointer(node);
+            node_index = child_pointer + child_offset;
+            node = svt.nodes[node_index];
+            node_child_mask = get_child_mask(node);
+            node_is_leaf = is_leaf(node);
+
+            scale -= 2;
+            child_index = get_node_index(position, scale);
+            node_has_child = has_child(node_child_mask, child_index);
+        }
+
+        if (node_is_leaf && node_has_child) {
+            // we've hit something
+            break;
+        }
+        // Now we advance to the next cell
+
+        uint advanceScale = scale;
+        // AND'ing 0b101010 with the child_index gives us the number of the octant that the child index is in.
+        // Shifting the mask at by the octant puts the current octant mask at the 0'th position.
+        // We compare the octant mask with a mask that is filled to see if our octant is *not* filled.
+        // If our octant is not filled. We can advance by one scale higher and skip a step!
+        uint octant_mask = 0x2A; // 0b101010
+        if ((node_child_mask >> (child_index & octant_mask) & 0x330033) == 0) {
+            advanceScale++;
+        }
+
+        // len = 2.0 ^ (scaleExp - 23)
+        float current_scale_length = uintBitsToFloat((advanceScale - 23 + 127) << 23);
+        vec3 current_cell_min_postion = clear_bellow_scale(position, advanceScale);
+
+        // Move the position to the end of this ray
+        // 0 if the sign is -1.0 and 1 if the sign is 1.0
+        vec3 plane_selector = sign(ray.direction) * 0.5 + 0.5;
+        vec3 plane_position = current_cell_min_postion + plane_selector * current_scale_length;
+        vec3 distance_to_plane = (plane_position - ray.origin) * inverse_direction;
+
+        // Intersect with the next plane to see wich one is closest
+        float t_max = min(min(distance_to_plane.x, distance_to_plane.y), distance_to_plane.z);
+
+        // Add the *exact* distance of this cell based on the closest plane to the minimum position of current cell to
+        // get the *exact* minimum position of the neighboring cell
+        uint axis_to_add = t_max == distance_to_plane.x ? 0 : (t_max == distance_to_plane.y ? 1 : 2);
+        current_cell_min_postion[axis_to_add] += sign(ray.direction)[axis_to_add] * current_scale_length;
+        vec3 neighbour_min = current_cell_min_postion;
+
+        // Add the exact length of the current cell scale. E.G: if our scale is 0.25, we add 0.24999999
+        vec3 neighbour_max = uintBitsToFloat(floatBitsToUint(neighbour_min) + ((1 << advanceScale) - 1));
+
+        position = clamp(ray.origin + t_max * ray.direction, neighbour_min, neighbour_max);
+
+        uvec3 position_diff = floatBitsToUint(position) ^ floatBitsToUint(current_cell_min_postion); // Give only the bits that are different
+        // We only care about the changes in the high bits at each scale beause that's when we may have transitioned scales
+        int newScale = findMSB((position_diff.x | position_diff.y | position_diff.z) & 0xFFAAAAAA); // TODO: try with 0xffd55554 instead because I think that those are the high bits
+
+        if (newScale > scale) {
+            scale = newScale;
+            if (scale > 21) { // TODO: I think that this should be >22 since we're going to a totally different exponent
+                // We are exiting outside the box because we're going to a totally different exponent
+                break;
+            }
+
+            node_index = stack[scale >> 1]; // get back our parent
+            node = svt.nodes[node_index];
+        }
+    }
+
+    HitInfo info;
+    info.number_of_steps = step_count;
+    info.hit = false;
+    info.position = position;
+
+    if (is_leaf(node) && scale <= 21) {
+        uint child_index = get_node_index(position, scale);
+        uint palette_index = leaf_data.data[get_child_pointer(node) + count_ones_until(get_child_mask(node), child_index)];
+        info.palette_index = palette_index;
+        // TODO: put in information about the normal
+    }
+
+    return info;
+}
+
+/// casts a ray into the world and returns that it sees
+/// Note that the ray must be in world coordinates instead of the [1.0..2.0) coordinate system used for traversal
+HitInfo cast_ray(uint model_scale, Ray ray) {
+    // TODO: profile this to see if I can get this faster
+
+    uvec3 model_size = uvec3(1 << (model_scale * 2));
+    // We want the model center to be at 0, so its min position must be in the negative octant
+    vec3 model_min_position = -vec3(model_size >> 1); // same as (vec3(model_size) / 2) * -1.0;
+    AABB aabb = AABB(model_min_position, vec3(model_size));
+    vec2 t_min_max = intersectAABB(ray, aabb);
+    float t_min = t_min_max.x;
+    float t_max = t_min_max.y;
+
+    // We're not even lookint at the model
+    if (t_min >= t_max || t_max < 0) {
+        HitInfo info;
+        info.number_of_steps = 0;
+        info.hit = false;
+        return info;
+    }
+
+    // the point is known to be "inside the box" if the tMin is negative
+    // This is because if a ray is inside a box, its minimum position is behind it
+    bool is_inside = t_min <= 0;
+    vec3 origin;
+
+    if (!is_inside) {
+        ray.origin += t_min * ray.direction;
+        // ray.origin = clamp(floor(ray.origin), aabb.minPos, aabb.minPos + aabb.size); // TODO: figure out why -1 is reduced from the max position
+    } else {
+        // If we're outside the model, advance the ray until we're looking at it
+        // ray.origin = clamp(floor(ray.origin + t_min * ray.direction), aabb.minPos, aabb.minPos + aabb.size);
+    }
+
+    // We need to scale the position of the ray between 0..1
+    float scale = 1.0 / model_size.x;
+
+    ray.origin = (ray.origin * scale) + 1.0; // Normalizing between 1.0..2.0
+
+    HitInfo info = traverse_scene(ray);
+
+    if (info.hit) {
+        // We scale back up the position of the ray once we're out
+        info.position = (info.position - 1.0) * model_size.x;
+    }
+    return info;
+}

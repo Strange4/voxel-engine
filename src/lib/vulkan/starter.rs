@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{
-    Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+    Device, DeviceCreateInfo, DeviceExtensions, DeviceFeatures, Queue, QueueCreateInfo, QueueFlags,
 };
 use vulkano::image::{Image, ImageUsage};
 use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions};
@@ -14,6 +14,16 @@ use winit::window::Window;
 fn get_device_extentions() -> DeviceExtensions {
     DeviceExtensions {
         khr_swapchain: true,
+        ..Default::default()
+    }
+}
+
+fn get_device_features() -> DeviceFeatures {
+    DeviceFeatures {
+        shader_int8: true,
+        shader_int64: true,
+        uniform_and_storage_buffer8_bit_access: true,
+        storage_push_constant8: true,
         ..Default::default()
     }
 }
@@ -91,6 +101,7 @@ pub fn get_physical_device_and_family_index_for_surface(
         .unwrap()
         .filter(|d| {
             d.supported_extensions().contains(&get_device_extentions())
+                && d.supported_features().contains(&get_device_features())
                 && d.properties().timestamp_period > 0.0
         })
         .filter_map(|d| {
@@ -159,6 +170,7 @@ pub fn get_device_and_queue(
                 ..Default::default()
             }],
             enabled_extensions: get_device_extentions(),
+            enabled_features: get_device_features(),
             ..Default::default()
         },
     )
