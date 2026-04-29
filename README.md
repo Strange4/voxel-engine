@@ -1,6 +1,14 @@
 # TODO
 
-### Implement 64 tree traversal in the compute shader
+### Debug 64 tree traversal
+
+- [x] Are the positions being normalized like I expect?
+- [x] Am I getting the right children when I go deeper?
+  - Nope, I wasn't getting the right index
+- [x] Am I going out of root when traversing?
+  - Nope, I am not keeping checking if we go out of the root because I resut the cell_min_position variable
+- [x] Am I hitting the voxels when the ray gets traversed?
+  - YES! I just wasn't returning that it actually hit something...
 
 ### START RAY TRACING!!!
 

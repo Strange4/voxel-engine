@@ -101,6 +101,8 @@ impl ApplicationHandler for App {
 
 impl App {
     pub fn new() -> Self {
+        let mut camera = Camera::new_at(-8.0, -8.0, -10.0);
+        camera.direction = Vec3::new(0.0001, 0.0001, 1.0);
         Self {
             window: None,
             engine: None,
@@ -108,7 +110,7 @@ impl App {
                 camera_settings: CameraSettings {
                     camera_centered: true,
                     speed: 25.0,
-                    camera: Camera::new_at(50.0, -50.0, -50.0),
+                    camera,
                     has_changed: true,
                 },
                 shader_settings: ShaderSettings {

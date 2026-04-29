@@ -288,7 +288,7 @@ impl HeadlessEngine {
             get_headless_device_and_queue(physical_device.clone(), queue_family_index);
 
         let voxel_data = XYZIVoxelData::from_vox_file(
-            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
+            VoxFile::load_vox_file(Path::new("models/tests/8 green corner cube.vox")).unwrap(),
         )
         .unwrap();
 
@@ -421,7 +421,7 @@ impl WindowedEngine {
             window.inner_size().into(),
         );
         let voxel_data = XYZIVoxelData::from_vox_file(
-            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
+            VoxFile::load_vox_file(Path::new("models/tests/8 green corner cube.vox")).unwrap(),
         )
         .unwrap();
 
@@ -489,6 +489,7 @@ impl WindowedEngine {
             self.gui.immediate_ui(render_fn);
         }
 
+        // println!("Acquiring the next swapchaing image");
         let maybe_swapchain = self.acquire_next_swapchain_image(window);
         if maybe_swapchain.is_none() {
             return;
@@ -615,6 +616,7 @@ impl WindowedEngine {
     }
 
     fn handle_recreate_swapchain(&mut self, window: &Arc<Window>) {
+        // println!("Recreating the swapchain");
         let (new_swapchain, new_images) = self
             .swapchain
             .recreate(SwapchainCreateInfo {

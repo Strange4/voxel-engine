@@ -24,6 +24,7 @@ fn get_device_features() -> DeviceFeatures {
         shader_int64: true,
         uniform_and_storage_buffer8_bit_access: true,
         storage_push_constant8: true,
+        uniform_buffer_standard_layout: true,
         ..Default::default()
     }
 }

@@ -12,7 +12,7 @@ struct HitInfo {
 uint get_node_index(vec3 position, uint scale) {
     uvec3 cell_position = floatBitsToUint(position) >> scale & 3;
     // Same as x + y * 4 + z * 16
-    return cell_position.x + cell_position.y >> 2 + cell_position.z >> 4;
+    return cell_position.x + (cell_position.y << 2) + (cell_position.z << 4);
 }
 
 /// Clears the bits bellow the scale
@@ -105,8 +105,8 @@ HitInfo traverse_scene(Ray ray) {
         // Add the *exact* distance of this cell based on the closest plane to the minimum position of current cell to
         // get the *exact* minimum position of the neighboring cell
         uint axis_to_add = t_max == distance_to_plane.x ? 0 : (t_max == distance_to_plane.y ? 1 : 2);
-        current_cell_min_postion[axis_to_add] += sign(ray.direction)[axis_to_add] * current_scale_length;
         vec3 neighbour_min = current_cell_min_postion;
+        neighbour_min[axis_to_add] += sign(ray.direction)[axis_to_add] * current_scale_length;
 
         // Add the exact length of the current cell scale. E.G: if our scale is 0.25, we add 0.24999999
         vec3 neighbour_max = uintBitsToFloat(floatBitsToUint(neighbour_min) + ((1 << advanceScale) - 1));
@@ -135,6 +135,7 @@ HitInfo traverse_scene(Ray ray) {
     info.position = position;
 
     if (is_leaf(node) && scale <= 21) {
+        info.hit = true;
         uint child_index = get_node_index(position, scale);
         uint palette_index = leaf_data.data[get_child_pointer(node) + count_ones_until(get_child_mask(node), child_index)];
         info.palette_index = palette_index;
@@ -171,7 +172,7 @@ HitInfo cast_ray(uint model_scale, Ray ray) {
     vec3 origin;
 
     if (!is_inside) {
-        ray.origin += t_min * ray.direction;
+        origin = t_min * ray.direction + ray.origin;
         // ray.origin = clamp(floor(ray.origin), aabb.minPos, aabb.minPos + aabb.size); // TODO: figure out why -1 is reduced from the max position
     } else {
         // If we're outside the model, advance the ray until we're looking at it
@@ -181,13 +182,13 @@ HitInfo cast_ray(uint model_scale, Ray ray) {
     // We need to scale the position of the ray between 0..1
     float scale = 1.0 / model_size.x;
 
-    ray.origin = (ray.origin * scale) + 1.0; // Normalizing between 1.0..2.0
+    origin = origin * scale - model_min_position * scale + 1.0; // Normalizing between 1.0..2.0
 
-    HitInfo info = traverse_scene(ray);
+    HitInfo info = traverse_scene(Ray(origin, ray.direction));
 
     if (info.hit) {
         // We scale back up the position of the ray once we're out
-        info.position = (info.position - 1.0) * model_size.x;
+        info.position = (info.position - 1.0) * model_size.x + model_min_position;
     }
     return info;
 }

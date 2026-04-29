@@ -92,7 +92,7 @@ void main() {
     Ray ray = generate_ray(push_constants);
     bool show_steps = bool(push_constants.shader_flags & 1);
 
-    HitInfo hit = traverse_scene(ray);
+    HitInfo hit = cast_ray(push_constants.model_scale, ray);
     // TODO: make the color the number of steps taken if the show steps variable is on
     // And make it a cool color scheme
 
