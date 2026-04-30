@@ -648,6 +648,8 @@ impl WindowedEngine {
 
         if suboptimal_image {
             self.handle_recreate_swapchain(window);
+            // Let's not give back a future for a swapchain that doesn't exist anymore
+            return None;
         }
 
         Some((swap_image_index, acquire_future))
