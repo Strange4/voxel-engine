@@ -114,8 +114,7 @@ impl App {
                     has_changed: true,
                 },
                 shader_settings: ShaderSettings {
-                    show_traversal_color: false,
-                    show_normals: false,
+                    render_type: RenderType::Albedo,
                     has_changed: true,
                 },
                 image_settings: ImageSettings {
@@ -329,19 +328,17 @@ impl App {
                 });
 
                 ui.collapsing("Render Type", |ui| {
-                    shader_settings_changed |= ui
-                        .checkbox(
-                            &mut settings.shader_settings.show_traversal_color,
-                            "Show Traveral Steps",
-                        )
-                        .changed();
-
-                    shader_settings_changed |= ui
-                        .checkbox(
-                            &mut settings.shader_settings.show_normals,
-                            "Show face normals",
-                        )
-                        .changed();
+                    ui.vertical(|ui| {
+                        for render_type in RenderType::iter() {
+                            shader_settings_changed |= ui
+                                .selectable_value(
+                                    &mut settings.shader_settings.render_type,
+                                    render_type,
+                                    format!("{render_type:?}"),
+                                )
+                                .changed();
+                        }
+                    });
                 });
             });
 
@@ -358,9 +355,7 @@ impl App {
         }
 
         if self.settings.shader_settings.has_changed {
-            let mut flags = 0;
-            flags |= (self.settings.shader_settings.show_traversal_color as u8) << 0;
-            flags |= (self.settings.shader_settings.show_normals as u8) << 1;
+            let flags = 1 << (self.settings.shader_settings.render_type as u8);
             engine.set_shader_flags(flags);
             self.settings.shader_settings.has_changed = false;
         }
@@ -385,9 +380,28 @@ struct CameraSettings {
 }
 
 struct ShaderSettings {
-    show_traversal_color: bool,
-    show_normals: bool,
+    render_type: RenderType,
     has_changed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RenderType {
+    TraversalSteps,
+    HitNormals,
+    HitPosition,
+    Albedo,
+}
+
+impl RenderType {
+    fn iter() -> impl Iterator<Item = Self> {
+        [
+            Self::TraversalSteps,
+            Self::HitNormals,
+            Self::HitPosition,
+            Self::Albedo,
+        ]
+        .into_iter()
+    }
 }
 
 struct ImageSettings {
