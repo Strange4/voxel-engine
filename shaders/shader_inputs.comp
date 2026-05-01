@@ -27,7 +27,6 @@ struct PushConstants {
     float camera_y;
     vec3 pixel_delta_down;
     float camera_z;
-    uvec3 model_size;
     uint8_t shader_flags;
     uint8_t model_scale;
     uint8_t padding_for_pc_range;

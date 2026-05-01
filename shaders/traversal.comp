@@ -49,7 +49,7 @@ HitInfo traverse_scene(Ray ray) {
     vec3 position = clamp(ray.origin, 1.0, 1.9999999); // We defined that our model is encompased between [1.0...2.0)
     vec3 inverse_direction = 1 / ray.direction;
 
-    int hit_axis = -1;
+    bvec3 side_mask = bvec3(false);
 
     uint max_steps = 256; // The actual max steps could be 2^22 which is the entire width of the model. But we'll cap it for now
     uint step_count = 0;
@@ -107,9 +107,9 @@ HitInfo traverse_scene(Ray ray) {
 
         // Add the *exact* distance of this cell based on the closest plane to the minimum position of current cell to
         // get the *exact* minimum position of the neighboring cell
-        hit_axis = t_max == distance_to_plane.x ? 0 : (t_max == distance_to_plane.y ? 1 : 2);
-        vec3 neighbour_min = current_cell_min_postion;
-        neighbour_min[hit_axis] += sign(ray.direction)[hit_axis] * current_scale_length;
+
+        side_mask = equal(distance_to_plane, vec3(t_max));
+        vec3 neighbour_min = mix(current_cell_min_postion, current_cell_min_postion + sign(ray.direction) * current_scale_length, side_mask);
 
         // Add the exact length of the current cell scale. E.G: if our scale is 0.25, we add 0.24999999
         vec3 neighbour_max = uintBitsToFloat(floatBitsToUint(neighbour_min) + ((1 << advanceScale) - 1));
@@ -142,13 +142,13 @@ HitInfo traverse_scene(Ray ray) {
         uint child_index = get_node_index(position, scale);
         uint palette_index = leaf_data.data[get_child_pointer(node) + count_ones_until(get_child_mask(node), child_index)];
         info.palette_index = palette_index;
-        vec3 normal = vec3(0);
-        if(hit_axis != -1) {
-            normal[hit_axis] = -sign(ray.direction)[hit_axis] * 1;
-            info.normal = normal;
-        } else {
+        info.normal = vec3(0);
+        if(any(side_mask) == false) {
             // If we haven't calculated the hit_axis, means that we haven't advance and we've hit the face of the cube
             // We're going to use the side of the cube that we first intersected as the normal instead of doing more math
+        } else {
+            // We advanced and hit something
+            info.normal = mix(vec3(0), -sign(ray.direction), side_mask);
         }
     }
 

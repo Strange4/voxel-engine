@@ -127,7 +127,7 @@ pub struct ModelData {
 impl ModelData {
     pub fn new_from_vox_data(device: Arc<Device>, mut voxel_data: XYZIVoxelData) -> Self {
         let allocator = Arc::new(StandardMemoryAllocator::new_default(device));
-        let size = voxel_data.size().clone();
+        let size = *voxel_data.size();
         let svt = Svt::from_voxel_data(&mut voxel_data);
 
         // We could resize the entire color pallete to only the colors that are used to save memory
@@ -145,7 +145,7 @@ impl ModelData {
                     | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
-            svt.node_pool.into_iter(),
+            svt.node_pool,
         )
         .expect("Couldn't create buffer");
 
@@ -160,7 +160,7 @@ impl ModelData {
                     | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
-            svt.leaf_data.into_iter(),
+            svt.leaf_data,
         )
         .expect("Couldn't create buffer");
 

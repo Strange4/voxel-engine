@@ -216,7 +216,7 @@ impl TryInto<SizeChunk> for &VoxChunk {
         if self.tag_name != "SIZE" {
             return Err(TransformChunkError::WrongTagName);
         }
-        if self.children.len() != 0 {
+        if !self.children.is_empty() {
             return Err(TransformChunkError::UnexpectedChildren);
         }
         let number_of_ints = 3;
@@ -229,12 +229,12 @@ impl TryInto<SizeChunk> for &VoxChunk {
         let y_size = u32::from_le_bytes(self.content[4..8].try_into().unwrap());
         let z_size = u32::from_le_bytes(self.content[8..12].try_into().unwrap());
 
-        return Ok(SizeChunk {
+        Ok(SizeChunk {
             tag_name: self.tag_name.clone(),
             x_size,
             y_size,
             z_size,
-        });
+        })
     }
 }
 
@@ -246,7 +246,7 @@ impl TryInto<XYZIChunk> for &VoxChunk {
         }
 
         // I do not support children yet
-        if self.children.len() != 0 {
+        if !self.children.is_empty() {
             return Err(TransformChunkError::UnexpectedChildren);
         }
 
@@ -274,10 +274,10 @@ impl TryInto<XYZIChunk> for &VoxChunk {
             })
             .collect();
 
-        return Ok(XYZIChunk {
+        Ok(XYZIChunk {
             tag_name: self.tag_name.clone(),
             voxels,
-        });
+        })
     }
 }
 
@@ -289,7 +289,7 @@ impl TryInto<RGBAChunk> for &VoxChunk {
             return Err(TransformChunkError::WrongTagName);
         }
 
-        if self.children.len() != 0 {
+        if !self.children.is_empty() {
             return Err(TransformChunkError::UnexpectedChildren);
         }
 
@@ -322,7 +322,7 @@ impl TryInto<PackChunk> for &VoxChunk {
             return Err(TransformChunkError::WrongTagName);
         }
 
-        if self.children.len() != 0 {
+        if !self.children.is_empty() {
             return Err(TransformChunkError::UnexpectedChildren);
         }
 
@@ -335,9 +335,9 @@ impl TryInto<PackChunk> for &VoxChunk {
     }
 }
 
-impl Into<VoxChunk> for RGBAChunk {
-    fn into(self) -> VoxChunk {
-        let content = self
+impl From<RGBAChunk> for VoxChunk {
+    fn from(val: RGBAChunk) -> Self {
+        let content = val
             .rgba_palette
             .iter()
             .flat_map(|color| {

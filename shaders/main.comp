@@ -13,18 +13,23 @@ void main() {
     if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
 
     Ray ray = generate_ray(push_constants);
-    bool show_steps = bool(push_constants.shader_flags & 1);
+    bool show_steps = bool((push_constants.shader_flags >> 0) & 1);
+    bool show_normals = bool((push_constants.shader_flags >> 1) & 1);
 
     HitInfo hit = cast_ray(push_constants.model_scale, ray);
 
     vec4 color;
-    if(show_steps) {
-        uint side_length = 1 << (push_constants.model_scale * 2);
-        color = vec4(magma_quintic(float(hit.number_of_steps) / float(side_length)), 1.0);
-    } else if(hit.hit) {
-        // The first byte should be `a` but its being interpreted as r
-        u8vec4 abgr_color = color_palette.palette[hit.palette_index];
-        color = vec4(abgr_color.wzyx) / 255; // floating point image type
+    if(hit.hit) {
+        if(show_steps) {
+            uint side_length = 1 << (push_constants.model_scale * 2);
+            color = vec4(magma_quintic(float(hit.number_of_steps) / float(side_length)), 1.0);
+        } else if(show_normals) {
+            color = vec4(hit.normal, 1);
+        } else {
+            // The first byte should be `a` but its being interpreted as r
+            u8vec4 abgr_color = color_palette.palette[hit.palette_index];
+            color = vec4(abgr_color.wzyx) / 255; // floating point image type
+        }
     } else {
         color = vec4(vec3(0.156862745), 1);
     }

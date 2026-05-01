@@ -1,4 +1,4 @@
-use glam::{UVec3, Vec3};
+use glam::Vec3;
 use vulkano::buffer::BufferContents;
 
 use crate::{camera::Camera, engine::engine_parts::ModelData};
@@ -15,7 +15,6 @@ pub struct PushConstants {
     camera_y: f32,
     pixel_delta_down: Vec3,
     camera_z: f32,
-    model_size: UVec3,
     shader_flags: u8,
     model_scale: u8,
 }
@@ -63,7 +62,6 @@ impl PushConstants {
             camera_z: camera_center.z,
             shader_flags,
             model_scale: model_data.model_scale,
-            model_size: model_data.size,
         }
     }
 }

@@ -47,13 +47,12 @@ impl XYZIVoxelData {
         });
 
         // Verify that some voxels aren't out of bounds
-        if let Some(voxel) = max_voxel_position {
-            if (voxel.x() as u32) > size_chunk.x()
+        if let Some(voxel) = max_voxel_position
+            && ((voxel.x() as u32) > size_chunk.x()
                 || (voxel.y() as u32) > size_chunk.y()
-                || (voxel.z() as u32) > size_chunk.z()
-            {
-                return Err(VoxelDataError::VoxelOutOfBounds);
-            }
+                || (voxel.z() as u32) > size_chunk.z())
+        {
+            return Err(VoxelDataError::VoxelOutOfBounds);
         };
 
         let color_palette = if let Some(rgba_chunk) = main_chunk.find_child("RGBA") {

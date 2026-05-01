@@ -221,8 +221,8 @@ impl Svt {
 
     fn child_mask(brick: &[u8; 64]) -> u64 {
         let mut mask = 0;
-        for i in 0..64 {
-            mask |= ((brick[i] != 0) as u64) << i;
+        for (i, value) in brick.iter().enumerate().take(64) {
+            mask |= ((*value != 0) as u64) << i;
         }
         mask
     }

@@ -1,28 +1,8 @@
 # TODO
 
-### Cleaning up
-
-- [x] Look why I'm looking backwards when I'm inside the cube
-  - You weren't setting the ray origin correctly
-- [x] See why I can't resize the screen in renderdoc
-  - Can't give back a swapchain future for an image right after you recreate the swapchain...
-- [x] Add a step count color with a nice gradient
-- [x] See if can use the 0xffd55554 mask when traversing
-  - Errrmmm actually, we need to check for the lower bits and not the high bits when changing scales...
-- [-] Center the camera to view exactly at 0 instead of offset by some amount: It is technically. But the model is in the positive y which is "down".
-- [ ] See if ray octant mirroring does anything
-
-### START RAY TRACING!!!
-
-Should probably add turn on and off features in the ui so that I can see the performance and visual difference.
+### Add multiple bounces and diffuse materials
 
 ### Add focal blur setting
-
-### Load multiple models from the same .vox file
-
-### Dispatch the compute shader independently from the swapchain so that you can render + blend images faster than you can present
-
-Don't wait for the swapchain to be presented. Dispatch the compute shader as fast as possible and the present command buffer should only present copy and present the output from the compute shader. Make sure to use fences and signals so that you don't write and read from the output image at the same time.
 
 ## Benchark log
 

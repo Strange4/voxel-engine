@@ -334,14 +334,9 @@ impl HeadlessEngine {
         };
 
         let command_buffer = Engine::<Self>::create_draw_to_image_command_buffer(
-            // engine_parts.push_contants,
             self.descriptor_set.clone(),
-            // engine_parts.command_buffer_allocator.clone(),
             &self.output_image,
-            &engine_parts,
-            // &engine_parts.queue,
-            // engine_parts.compute_pipeline.clone(),
-            // &engine_parts.query_pool,
+            engine_parts,
             true,
             0,
         )
@@ -469,7 +464,7 @@ impl WindowedEngine {
             output_images,
             present_images_and_views: images_and_views,
             descriptor_sets,
-            gui: gui,
+            gui,
         };
 
         (renderer, engine_parts)
@@ -489,7 +484,6 @@ impl WindowedEngine {
             self.gui.immediate_ui(render_fn);
         }
 
-        // println!("Acquiring the next swapchaing image");
         let maybe_swapchain = self.acquire_next_swapchain_image(window);
         if maybe_swapchain.is_none() {
             return;
@@ -513,17 +507,12 @@ impl WindowedEngine {
         };
 
         let command_buffer = Self::create_draw_to_swapchain_command_buffer(
-            // engine_parts.push_contants,
             self.descriptor_sets[swap_image_index as usize].clone(),
-            // engine_parts.command_buffer_allocator.clone(),
             self.present_images_and_views[swap_image_index as usize]
                 .0
                 .clone(),
             self.output_images[swap_image_index as usize].clone(),
             engine_parts,
-            // &engine_parts.queue,
-            // engine_parts.compute_pipeline.clone(),
-            // engine_parts.query_pool.clone(),
             swap_image_index,
             self.should_record[swap_image_index as usize],
         );
@@ -601,7 +590,7 @@ impl WindowedEngine {
     fn handle_output_resize(&mut self, engine_parts: &mut EngineParts) {
         let (descriptor_sets, output_images) = Self::create_descriptor_sets_and_output_images(
             self.present_images_and_views.len() as u32,
-            &engine_parts,
+            engine_parts,
         );
 
         self.output_images = output_images;
@@ -616,7 +605,6 @@ impl WindowedEngine {
     }
 
     fn handle_recreate_swapchain(&mut self, window: &Arc<Window>) {
-        // println!("Recreating the swapchain");
         let (new_swapchain, new_images) = self
             .swapchain
             .recreate(SwapchainCreateInfo {
@@ -633,7 +621,6 @@ impl WindowedEngine {
         &mut self,
         window: &Arc<Window>,
     ) -> Option<(u32, SwapchainAcquireFuture)> {
-        // let now = Instant::now();
         let result =
             swapchain::acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap);
 
@@ -708,29 +695,19 @@ impl WindowedEngine {
     // Gets the command buffer for a single dispatch of the compute shader.
     // This is done so that we can modify the push constants every frame.
     fn create_draw_to_swapchain_command_buffer(
-        // push_constants: PushConstants,
         descriptor_set: Arc<DescriptorSet>,
-        // allocator: Arc<StandardCommandBufferAllocator>,
         present_image: Arc<Image>,
         output_image: Arc<Image>,
         engine_parts: &EngineParts,
-        // queue: &Arc<Queue>,
-        // pipeline: Arc<ComputePipeline>,
-        // query_pool: Arc<QueryPool>,
         swapchain_index: u32,
         should_write_timestamp: bool,
     ) -> Arc<PrimaryAutoCommandBuffer> {
         let timestamp_index = swapchain_index * MAX_TIMESTAMP_QUERIES_PER_IMAGE;
 
         let mut builder = Engine::<Self>::create_draw_to_image_command_buffer(
-            // push_constants,
             descriptor_set,
-            // allocator,
             &output_image,
             engine_parts,
-            // queue,
-            // pipeline,
-            // &query_pool,
             should_write_timestamp,
             timestamp_index,
         );

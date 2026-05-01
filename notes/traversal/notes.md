@@ -63,3 +63,7 @@ The 22'nd bit in base 0 is the edge of the mantissa. This would mean that the tr
 This doesn't break because 0xFFAAAAAA actually clears the 22'nd bit (base 0) when trying to find the first bit high.
 
 ###### Answer: Yes, but since we are only checking for a change in low bits of each scale, > 21 is the same as > 22 because of the mask.
+
+# Why not implementing Ray Octant mirroring?
+
+I implemented it and found that its about ~8% faster on average. But I didn't quite understand it to justify putting in the code

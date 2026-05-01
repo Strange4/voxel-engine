@@ -115,6 +115,7 @@ impl App {
                 },
                 shader_settings: ShaderSettings {
                     show_traversal_color: false,
+                    show_normals: false,
                     has_changed: true,
                 },
                 image_settings: ImageSettings {
@@ -214,7 +215,7 @@ impl App {
                 .move_up(-translation_speed);
             handled = true;
         }
-        return handled;
+        handled
     }
 
     fn handle_spherical_camera_movement(&mut self, delta_time: f32) -> bool {
@@ -269,7 +270,7 @@ impl App {
             handled = true;
         }
 
-        return handled;
+        handled
     }
 
     fn render_gui(gui: &mut Gui, settings: &mut AppSettings, rendering_time_ns: f64) {
@@ -327,11 +328,18 @@ impl App {
                     }
                 });
 
-                ui.collapsing("Shader", |ui| {
+                ui.collapsing("Render Type", |ui| {
                     shader_settings_changed |= ui
                         .checkbox(
                             &mut settings.shader_settings.show_traversal_color,
                             "Show Traveral Steps",
+                        )
+                        .changed();
+
+                    shader_settings_changed |= ui
+                        .checkbox(
+                            &mut settings.shader_settings.show_normals,
+                            "Show face normals",
                         )
                         .changed();
                 });
@@ -350,7 +358,9 @@ impl App {
         }
 
         if self.settings.shader_settings.has_changed {
-            let flags = self.settings.shader_settings.show_traversal_color as u8;
+            let mut flags = 0;
+            flags |= (self.settings.shader_settings.show_traversal_color as u8) << 0;
+            flags |= (self.settings.shader_settings.show_normals as u8) << 1;
             engine.set_shader_flags(flags);
             self.settings.shader_settings.has_changed = false;
         }
@@ -376,6 +386,7 @@ struct CameraSettings {
 
 struct ShaderSettings {
     show_traversal_color: bool,
+    show_normals: bool,
     has_changed: bool,
 }
 
