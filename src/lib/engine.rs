@@ -92,7 +92,7 @@ impl<T> Engine<T> {
             &self.engine_parts.image_size,
             &self.engine_parts.camera,
             self.engine_parts.shader_flags,
-            self.engine_parts.model_data.model_scale,
+            &self.engine_parts.model_data,
         );
     }
 
@@ -288,7 +288,7 @@ impl HeadlessEngine {
             get_headless_device_and_queue(physical_device.clone(), queue_family_index);
 
         let voxel_data = XYZIVoxelData::from_vox_file(
-            VoxFile::load_vox_file(Path::new("models/tests/8 green corner cube.vox")).unwrap(),
+            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
         )
         .unwrap();
 
@@ -421,7 +421,7 @@ impl WindowedEngine {
             window.inner_size().into(),
         );
         let voxel_data = XYZIVoxelData::from_vox_file(
-            VoxFile::load_vox_file(Path::new("models/tests/8 green corner cube.vox")).unwrap(),
+            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
         )
         .unwrap();
 
@@ -611,7 +611,7 @@ impl WindowedEngine {
             &engine_parts.image_size,
             &engine_parts.camera,
             engine_parts.shader_flags,
-            engine_parts.model_data.model_scale,
+            &engine_parts.model_data,
         );
     }
 

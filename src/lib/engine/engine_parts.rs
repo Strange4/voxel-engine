@@ -1,3 +1,4 @@
+use glam::UVec3;
 use std::sync::Arc;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
@@ -59,7 +60,7 @@ impl EngineParts {
             &output_image_size,
             &camera,
             default_shader_flags,
-            model_data.model_scale,
+            &model_data,
         );
 
         let command_buffer_allocator = Arc::new(StandardCommandBufferAllocator::new(
@@ -120,12 +121,17 @@ pub struct ModelData {
     pub leaf_data: Subbuffer<[u8]>,
     pub color_palette: Subbuffer<[u32]>,
     pub model_scale: u8,
+    pub size: UVec3,
 }
 
 impl ModelData {
     pub fn new_from_vox_data(device: Arc<Device>, mut voxel_data: XYZIVoxelData) -> Self {
         let allocator = Arc::new(StandardMemoryAllocator::new_default(device));
+        let size = voxel_data.size().clone();
         let svt = Svt::from_voxel_data(&mut voxel_data);
+
+        // We could resize the entire color pallete to only the colors that are used to save memory
+        // But its 1KB anyway so doesn't matter much
         let color_palette = voxel_data.color_palette();
 
         let nodes_buffer = Buffer::from_iter(
@@ -178,6 +184,7 @@ impl ModelData {
             leaf_data: leaf_data_buffer,
             color_palette: color_palette_buffer,
             model_scale: svt.scale,
+            size,
         }
     }
 }

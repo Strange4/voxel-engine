@@ -64,7 +64,6 @@ fn test_build_tree_level2() {
 
     // There's 8 voxels in this file
     assert_eq!(tree.leaf_data.len(), 8);
-    assert_eq!(color_palette[tree.leaf_data[0] as usize], 0x00_FF_00_FF);
 
     // Since the model is 16^3, there should only be two levels
     // and because there are only 8 voxels in level 1, the total number of nodes should be 8 + 1 (top level)
@@ -99,5 +98,11 @@ fn test_build_tree_level2() {
         // The voxel is at the same relative position to the root.
         // E.G. back left child has a voxel in its back left
         assert_eq!(child.child_mask(), 1 << i);
+
+        // Make sure that it is green
+        let child_pointer = child.child_pointer();
+        let palette_index = tree.leaf_data[child_pointer as usize];
+        let green_rgba = 0x00_FF_00_FF;
+        assert_eq!(color_palette[palette_index as usize], green_rgba);
     }
 }

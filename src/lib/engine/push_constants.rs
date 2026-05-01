@@ -1,12 +1,11 @@
-// Vec3's get padded to vec 4's anyway. So I instead of leaving those bytes to waste we use them to represent the camera
-
-use glam::Vec3;
+use glam::{UVec3, Vec3};
 use vulkano::buffer::BufferContents;
 
-use crate::camera::Camera;
+use crate::{camera::Camera, engine::engine_parts::ModelData};
 
 // we have to use vec4's instead of vec3's because of how the alignment works in push constants in vulkan
 // see: https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.align-packed
+// Vec3's get aligned to vec 4's anyway. So I instead of leaving those bytes to waste we use them to represent the camera
 #[repr(C)]
 #[derive(BufferContents, Clone, Copy, Debug)]
 pub struct PushConstants {
@@ -16,12 +15,18 @@ pub struct PushConstants {
     camera_y: f32,
     pixel_delta_down: Vec3,
     camera_z: f32,
+    model_size: UVec3,
     shader_flags: u8,
     model_scale: u8,
 }
 
 impl PushConstants {
-    pub fn new(image_size: &[u32; 2], camera: &Camera, shader_flags: u8, model_scale: u8) -> Self {
+    pub fn new(
+        image_size: &[u32; 2],
+        camera: &Camera,
+        shader_flags: u8,
+        model_data: &ModelData,
+    ) -> Self {
         let up_vector: Vec3 = camera.up;
         let image_width = image_size[0] as f32;
         let image_height = image_size[1] as f32;
@@ -57,7 +62,8 @@ impl PushConstants {
             camera_y: camera_center.y,
             camera_z: camera_center.z,
             shader_flags,
-            model_scale,
+            model_scale: model_data.model_scale,
+            model_size: model_data.size,
         }
     }
 }

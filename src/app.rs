@@ -101,14 +101,14 @@ impl ApplicationHandler for App {
 
 impl App {
     pub fn new() -> Self {
-        let mut camera = Camera::new_at(-8.0, -8.0, -10.0);
-        camera.direction = Vec3::new(0.0001, 0.0001, 1.0);
+        let mut camera = Camera::new_at(0.0, 0.0, 0.0);
+        camera.direction = Vec3::new(1.0, 1.0, 1.0).normalize();
         Self {
             window: None,
             engine: None,
             settings: AppSettings {
                 camera_settings: CameraSettings {
-                    camera_centered: true,
+                    camera_centered: false,
                     speed: 25.0,
                     camera,
                     has_changed: true,
@@ -135,8 +135,7 @@ impl App {
             self.handle_free_camera_movement(delta_time)
         };
 
-        self.settings.camera_settings.has_changed =
-            self.settings.camera_settings.has_changed || has_changed;
+        self.settings.camera_settings.has_changed |= has_changed;
     }
 
     fn handle_free_camera_movement(&mut self, delta_time: f32) -> bool {
@@ -286,7 +285,7 @@ impl App {
 
                 ui.collapsing("Image", |ui| {
                     ui.horizontal(|ui| {
-                        image_settings_changed = ui
+                        image_settings_changed |= ui
                             .add(
                                 Slider::new(
                                     &mut settings.image_settings.resolution_multiplier,
@@ -295,8 +294,7 @@ impl App {
                                 .text("Resolution: ")
                                 .show_value(false),
                             )
-                            .changed()
-                            || image_settings_changed;
+                            .changed();
                         let size = settings.image_settings.output_image_size();
                         let width = size[0];
                         let height = size[1];
@@ -310,7 +308,7 @@ impl App {
                         Slider::new(&mut settings.camera_settings.speed, 0.0..=100.0).text("Speed"),
                     );
 
-                    camera_changed = ui
+                    camera_changed |= ui
                         .add(
                             Slider::new(
                                 &mut settings.camera_settings.camera.field_of_view,
@@ -318,8 +316,7 @@ impl App {
                             )
                             .text("Field of view"),
                         )
-                        .changed()
-                        || camera_changed;
+                        .changed();
 
                     let camera_handling_changed = ui
                         .checkbox(&mut settings.camera_settings.camera_centered, "Center")
@@ -331,13 +328,12 @@ impl App {
                 });
 
                 ui.collapsing("Shader", |ui| {
-                    shader_settings_changed = ui
+                    shader_settings_changed |= ui
                         .checkbox(
                             &mut settings.shader_settings.show_traversal_color,
                             "Show Traveral Steps",
                         )
-                        .changed()
-                        || shader_settings_changed;
+                        .changed();
                 });
             });
 

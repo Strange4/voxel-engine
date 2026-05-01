@@ -21,7 +21,7 @@ Ray generate_ray(PushConstants push_constants) {
     return ray;
 }
 
-vec2 intersectAABB(Ray ray, AABB aabb) {
+vec3 intersectAABB(Ray ray, AABB aabb) {
     vec3 inverse = 1 / ray.direction;
     vec3 t_min = (aabb.minPos - ray.origin) * inverse;
     vec3 t_max = (aabb.minPos + aabb.size - ray.origin) * inverse;
@@ -29,5 +29,6 @@ vec2 intersectAABB(Ray ray, AABB aabb) {
     vec3 t2 = max(t_min, t_max);
     float t_near = max(max(t1.x, t1.y), t1.z);
     float t_far = min(min(t2.x, t2.y), t2.z);
-    return vec2(t_near, t_far);
+    float input_axis = t_near == t1.x ? 0 : (t_near == t1.y ? 1 : 2);
+    return vec3(t_near, t_far, input_axis);
 }

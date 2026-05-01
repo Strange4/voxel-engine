@@ -46,7 +46,7 @@ Now we only need to do one intersection calculation for this exit plane doing `t
 
 We could just advance the postion by the exact t amount by doing `pos = ray.origin + t_max * ray.direction`. But the floating point error of multiplying will not always lead us to _enter_ the next cell and could lead us to stick to the current cell. We could add a bias like `0.00001` to nudge it into the next direction but this produces some artifacts. Instead we will find the exact bounds of the neighbor and clamp the ray to be within the neighbor min and max. To do this, we will advance the position by _one_ scale length in the direction of the ray to find the neighbor min position because this puts us at exactly at the _start_ of the neighbooring cell. To find the max, we add the size of a cell at the current scale. Which we defined to be the excluive end of our scale length. E.G: if our scale is 0.25, the start of our current cell can be 1.25 and the end is 1.4999999 because at 1.5 is the start of the next one. To add one scale length to our neighboor min, we will add all the bits _bellow_ the scale directly to the mantissa of the neighbor min. This makes us add everything that is right up to the edge of the length of the scale but not the scale itself which would make us jump to the cell after the neighbor.
 
-# Things that I wish I could ask dubiousconst282
+# Things that I didn't quite understand
 
 He made a [great explanation of 64 trees](https://dubiousconst282.github.io/2024/10/03/voxel-ray-tracing/).
 
@@ -54,8 +54,12 @@ He made a [great explanation of 64 trees](https://dubiousconst282.github.io/2024
 
 You can put it directly into the [IEEE converter](https://www.h-schmidt.net/FloatConverter/IEEE754.html) and you will see that this is looking for the low bits. In the change and not the high bits. It doesn't matter since we always check for a change in scale, but we are checking the exact places we are trying not to.
 
+###### Answer: They are indeed the low bits
+
 #### Why would the different in scale be > 21 and not > 22?
 
 The 22'nd bit in base 0 is the edge of the mantissa. This would mean that the traversal would stop at a quarter of the model if we look from the vec3(0) position into the model. After traversing from 1.25 to 1.5 it would break the traversal since it would find that bit 22 (1.5) has changed.
 
 This doesn't break because 0xFFAAAAAA actually clears the 22'nd bit (base 0) when trying to find the first bit high.
+
+###### Answer: Yes, but since we are only checking for a change in low bits of each scale, > 21 is the same as > 22 because of the mask.

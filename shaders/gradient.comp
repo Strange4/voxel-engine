@@ -1,0 +1,15 @@
+/// Shout out vidris: https://www.shadertoy.com/view/XtGGzG
+
+float saturate( float x ) { return clamp( x, 0.0, 1.0 ); }
+vec3 saturate( vec3 x ) { return clamp( x, vec3(0.0,0.0,0.0), vec3(1.0,1.0,1.0) ); }
+
+vec3 magma_quintic( float x)
+{
+	x = saturate( x );
+	vec4 x1 = vec4( 1.0, x, x * x, x * x * x ); // 1 x x2 x3
+	vec4 x2 = x1 * x1.w * x; // x4 x5 x6 x7
+	return saturate( vec3(
+		dot( x1.xyzw, vec4( -0.023226960, +1.087154378, -0.109964741, +6.333665763 ) ) + dot( x2.xy, vec2( -11.640596589, +5.337625354 ) ),
+		dot( x1.xyzw, vec4( +0.010680993, +0.176613780, +1.638227448, -6.743522237 ) ) + dot( x2.xy, vec2( +11.426396979, -5.523236379 ) ),
+		dot( x1.xyzw, vec4( -0.008260782, +2.244286052, +3.005587601, -24.279769818 ) ) + dot( x2.xy, vec2( +32.484310068, -12.688259703 ) ) ) );
+}

@@ -1,14 +1,16 @@
 # TODO
 
-### Debug 64 tree traversal
+### Cleaning up
 
-- [x] Are the positions being normalized like I expect?
-- [x] Am I getting the right children when I go deeper?
-  - Nope, I wasn't getting the right index
-- [x] Am I going out of root when traversing?
-  - Nope, I am not keeping checking if we go out of the root because I resut the cell_min_position variable
-- [x] Am I hitting the voxels when the ray gets traversed?
-  - YES! I just wasn't returning that it actually hit something...
+- [x] Look why I'm looking backwards when I'm inside the cube
+  - You weren't setting the ray origin correctly
+- [x] See why I can't resize the screen in renderdoc
+  - Can't give back a swapchain future for an image right after you recreate the swapchain...
+- [x] Add a step count color with a nice gradient
+- [x] See if can use the 0xffd55554 mask when traversing
+  - Errrmmm actually, we need to check for the lower bits and not the high bits when changing scales...
+- [-] Center the camera to view exactly at 0 instead of offset by some amount: It is technically. But the model is in the positive y which is "down".
+- [ ] See if ray octant mirroring does anything
 
 ### START RAY TRACING!!!
 
@@ -111,6 +113,8 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+- [x] Debug 64 tree traversal
+- [x] Implement 64 tree traveral
 - [x] Add output image resolution change
 - [x] Fix camera in spherical coordinates
 - [x] Add free camera checkbox

@@ -6,84 +6,7 @@
 #include "shader_inputs.comp"
 #include "ray.comp"
 #include "traversal.comp"
-
-vec4 getVoxelAtCoord(vec3 coord, AABB aabb) {
-    ivec3 voxelCoord = ivec3(coord - aabb.minPos);
-    return vec4(0);
-    // return imageLoad(model, voxelCoord);
-}
-
-bool pointIsInsideBox(vec3 point, AABB box) {
-    return all(greaterThanEqual(point, box.minPos)) && all(lessThanEqual(point, box.minPos + box.size));
-}
-
-vec4 traverse_and_get_color(Ray ray, vec2 tMinMax, AABB aabb, bool show_steps) {
-    float tMin = tMinMax.x;
-    float tMax = tMinMax.y;
-    vec3 currentPoint;
-
-    // the point is known to be "inside the box" if the tMin is negative
-    // This is because if a ray is inside a box, its minimum position is behind it
-    // bool isInside = pointIsInsideBox(ray.origin, aabb);
-    bool isInside = tMin <= 0;
-    if (isInside) {
-        currentPoint = clamp(floor(ray.origin), aabb.minPos, aabb.minPos + aabb.size - 1);
-    } else {
-        currentPoint = clamp(floor(ray.origin + tMin * ray.direction), aabb.minPos, aabb.minPos + aabb.size - 1);
-    }
-    vec3 endPoint = ray.origin + ray.direction * tMax;
-    // this will select the "next" plane that the ray will intersect with.
-    // See https://www.youtube.com/watch?v=ztkh1r1ioZo for more info
-    // 0 if the sign is -1.0 and 1 if the sign is 1.0
-    vec3 planeSelector = sign(ray.direction) * 0.5 + 0.5;
-    vec3 integerPlanes = currentPoint + planeSelector;
-    vec3 t = (integerPlanes - ray.origin) / ray.direction;
-    vec3 planeStep = sign(ray.direction);
-    vec3 tDelta = abs(1 / ray.direction);
-    uint steps = 0;
-    uint max_steps = uint(aabb.size.x + aabb.size.y + aabb.size.z);
-    vec3 maxPoint = aabb.minPos + aabb.size;
-
-    // TODO: make this a for loop with max value of the max steps
-
-    // while the current position falls within the bounding box
-    while (all(greaterThanEqual(currentPoint, aabb.minPos)) && all(lessThanEqual(currentPoint, maxPoint))) {
-        vec4 voxelValue = getVoxelAtCoord(currentPoint, aabb);
-        if (voxelValue.a > 0.0) {
-            return voxelValue;
-        }
-        steps++;
-
-        if (steps >= max_steps) {
-            return vec4(1, 0, 0, 1);
-        }
-
-        int axis = (t.x < t.y) ? ((t.x < t.z) ? 0 : 2) : ((t.y < t.z) ? 1 : 2);
-        currentPoint[axis] += planeStep[axis];
-        t[axis] += tDelta[axis];
-    }
-    if (show_steps) {
-        float maxSteps = float(aabb.size.x + aabb.size.y + aabb.size.z);
-        float stepRatio = float(steps) / maxSteps;
-        return vec4(vec3(stepRatio).xyz, 1);
-    } else {
-        return vec4(vec3(0.156862745).xyz, 1);
-    }
-}
-
-vec4 rayColor(Ray ray, bool show_steps) {
-    // vec3 modelSize = vec3(imageSize(model));
-    vec3 modelSize = vec3(0);
-    vec3 modelPosition = modelSize * -0.5;
-    AABB aabb = AABB(modelPosition, modelSize);
-    vec2 tMinMax = intersectAABB(ray, aabb);
-    float tMin = tMinMax.x;
-    float tMax = tMinMax.y;
-    if (tMin >= tMax || tMax < 0) {
-        return vec4(vec3(0.156862745).xyz, 1);
-    }
-    return traverse_and_get_color(ray, tMinMax, aabb, show_steps);
-}
+#include "gradient.comp"
 
 void main() {
     vec2 imgSize = vec2(imageSize(out_image));
@@ -93,14 +16,17 @@ void main() {
     bool show_steps = bool(push_constants.shader_flags & 1);
 
     HitInfo hit = cast_ray(push_constants.model_scale, ray);
-    // TODO: make the color the number of steps taken if the show steps variable is on
-    // And make it a cool color scheme
 
     vec4 color;
-    if (hit.hit) {
-        color = color_palette.palette[hit.palette_index];
+    if(show_steps) {
+        uint side_length = 1 << (push_constants.model_scale * 2);
+        color = vec4(magma_quintic(float(hit.number_of_steps) / float(side_length)), 1.0);
+    } else if(hit.hit) {
+        // The first byte should be `a` but its being interpreted as r
+        u8vec4 abgr_color = color_palette.palette[hit.palette_index];
+        color = vec4(abgr_color.wzyx) / 255; // floating point image type
     } else {
-        color = vec4(vec3(0.156862745).xyz, 1);
+        color = vec4(vec3(0.156862745), 1);
     }
     imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), color);
 }

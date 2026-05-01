@@ -1,5 +1,6 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
+/// Information about a hit
 struct HitInfo {
     uint number_of_steps;
     bool hit;
@@ -47,6 +48,8 @@ HitInfo traverse_scene(Ray ray) {
     uint scale = 21; // 21's bit in ieee floating point is 0.25
     vec3 position = clamp(ray.origin, 1.0, 1.9999999); // We defined that our model is encompased between [1.0...2.0)
     vec3 inverse_direction = 1 / ray.direction;
+
+    int hit_axis = -1;
 
     uint max_steps = 256; // The actual max steps could be 2^22 which is the entire width of the model. But we'll cap it for now
     uint step_count = 0;
@@ -104,9 +107,9 @@ HitInfo traverse_scene(Ray ray) {
 
         // Add the *exact* distance of this cell based on the closest plane to the minimum position of current cell to
         // get the *exact* minimum position of the neighboring cell
-        uint axis_to_add = t_max == distance_to_plane.x ? 0 : (t_max == distance_to_plane.y ? 1 : 2);
+        hit_axis = t_max == distance_to_plane.x ? 0 : (t_max == distance_to_plane.y ? 1 : 2);
         vec3 neighbour_min = current_cell_min_postion;
-        neighbour_min[axis_to_add] += sign(ray.direction)[axis_to_add] * current_scale_length;
+        neighbour_min[hit_axis] += sign(ray.direction)[hit_axis] * current_scale_length;
 
         // Add the exact length of the current cell scale. E.G: if our scale is 0.25, we add 0.24999999
         vec3 neighbour_max = uintBitsToFloat(floatBitsToUint(neighbour_min) + ((1 << advanceScale) - 1));
@@ -115,11 +118,11 @@ HitInfo traverse_scene(Ray ray) {
 
         uvec3 position_diff = floatBitsToUint(position) ^ floatBitsToUint(current_cell_min_postion); // Give only the bits that are different
         // We only care about the changes in the high bits at each scale beause that's when we may have transitioned scales
-        int newScale = findMSB((position_diff.x | position_diff.y | position_diff.z) & 0xFFAAAAAA); // TODO: try with 0xffd55554 instead because I think that those are the high bits
+        int newScale = findMSB((position_diff.x | position_diff.y | position_diff.z) & 0xFFAAAAAA);
 
         if (newScale > scale) {
             scale = newScale;
-            if (scale > 21) { // TODO: I think that this should be >22 since we're going to a totally different exponent
+            if (scale > 22) {
                 // We are exiting outside the box because we're going to a totally different exponent
                 break;
             }
@@ -139,7 +142,14 @@ HitInfo traverse_scene(Ray ray) {
         uint child_index = get_node_index(position, scale);
         uint palette_index = leaf_data.data[get_child_pointer(node) + count_ones_until(get_child_mask(node), child_index)];
         info.palette_index = palette_index;
-        // TODO: put in information about the normal
+        vec3 normal = vec3(0);
+        if(hit_axis != -1) {
+            normal[hit_axis] = -sign(ray.direction)[hit_axis] * 1;
+            info.normal = normal;
+        } else {
+            // If we haven't calculated the hit_axis, means that we haven't advance and we've hit the face of the cube
+            // We're going to use the side of the cube that we first intersected as the normal instead of doing more math
+        }
     }
 
     return info;
@@ -149,14 +159,13 @@ HitInfo traverse_scene(Ray ray) {
 /// Note that the ray must be in world coordinates instead of the [1.0..2.0) coordinate system used for traversal
 HitInfo cast_ray(uint model_scale, Ray ray) {
     // TODO: profile this to see if I can get this faster
-
     uvec3 model_size = uvec3(1 << (model_scale * 2));
-    // We want the model center to be at 0, so its min position must be in the negative octant
-    vec3 model_min_position = -vec3(model_size >> 1); // same as (vec3(model_size) / 2) * -1.0;
+    vec3 model_min_position = vec3(0);
     AABB aabb = AABB(model_min_position, vec3(model_size));
-    vec2 t_min_max = intersectAABB(ray, aabb);
-    float t_min = t_min_max.x;
-    float t_max = t_min_max.y;
+    vec3 t_min_max_and_axis = intersectAABB(ray, aabb);
+    float t_min = t_min_max_and_axis.x;
+    float t_max = t_min_max_and_axis.y;
+    uint input_axis = uint(t_min_max_and_axis.z);
 
     // We're not even lookint at the model
     if (t_min >= t_max || t_max < 0) {
@@ -169,26 +178,31 @@ HitInfo cast_ray(uint model_scale, Ray ray) {
     // the point is known to be "inside the box" if the tMin is negative
     // This is because if a ray is inside a box, its minimum position is behind it
     bool is_inside = t_min <= 0;
-    vec3 origin;
+    vec3 origin = ray.origin;
 
     if (!is_inside) {
         origin = t_min * ray.direction + ray.origin;
-        // ray.origin = clamp(floor(ray.origin), aabb.minPos, aabb.minPos + aabb.size); // TODO: figure out why -1 is reduced from the max position
-    } else {
-        // If we're outside the model, advance the ray until we're looking at it
-        // ray.origin = clamp(floor(ray.origin + t_min * ray.direction), aabb.minPos, aabb.minPos + aabb.size);
     }
 
     // We need to scale the position of the ray between 0..1
     float scale = 1.0 / model_size.x;
 
-    origin = origin * scale - model_min_position * scale + 1.0; // Normalizing between 1.0..2.0
+    origin = origin * scale + 1.0; // Normalizing between 1.0..2.0
 
     HitInfo info = traverse_scene(Ray(origin, ray.direction));
 
     if (info.hit) {
         // We scale back up the position of the ray once we're out
-        info.position = (info.position - 1.0) * model_size.x + model_min_position;
+        info.position = (info.position - 1.0) * model_size.x;
+
+        // If we don't have the normal means that we've hit one of the faces of the cube
+        // We can see which face we hit using the aabb intersection
+        if (info.normal == vec3(0)) {
+            vec3 normal = vec3(0);
+            normal[input_axis] = -sign(ray.direction)[input_axis] * 1;
+            info.normal = normal;
+        }
     }
+
     return info;
 }

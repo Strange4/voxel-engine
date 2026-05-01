@@ -14,6 +14,7 @@ pub struct Camera {
 }
 
 impl Camera {
+    /// Creates a new camera at that position looking at the 0 position
     pub fn new_at(x: f32, y: f32, z: f32) -> Self {
         Self {
             position: Vec3::new(x, y, z),

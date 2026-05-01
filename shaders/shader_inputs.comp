@@ -4,7 +4,7 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba8) uniform image2D out_image;
+layout(set = 0, binding = 0, rgba8) writeonly uniform image2D out_image;
 
 layout(std430, set = 0, binding = 1) readonly buffer Svt
 {
@@ -27,6 +27,7 @@ struct PushConstants {
     float camera_y;
     vec3 pixel_delta_down;
     float camera_z;
+    uvec3 model_size;
     uint8_t shader_flags;
     uint8_t model_scale;
     uint8_t padding_for_pc_range;
