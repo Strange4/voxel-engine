@@ -94,7 +94,7 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 # DONE
 
 - [x] Debug 64 tree traversal
-- [x] Implement 64 tree traveral
+- [x] Implement 64 tree traveral: Sweet sweet 66% frame improvement from this. Frame from 90ms to 30ms babyyy
 - [x] Add output image resolution change
 - [x] Fix camera in spherical coordinates
 - [x] Add free camera checkbox
