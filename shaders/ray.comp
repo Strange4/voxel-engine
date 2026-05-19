@@ -32,3 +32,30 @@ vec3 intersectAABB(Ray ray, AABB aabb) {
     float input_axis = t_near == t1.x ? 0 : (t_near == t1.y ? 1 : 2);
     return vec3(t_near, t_far, input_axis);
 }
+
+uint random_u32(inout uint seed) {
+    uint state = seed * 747796405 + 2891336453;
+    uint word = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+    uint rand = (word >> 22) ^ word;
+    seed = rand;
+    return rand;
+}
+
+uint generate_seed(uvec2 uv, uint frame_number) {
+    uint seed = uv.x ^ (uv.y << 16);
+    seed = random_u32(seed);
+    seed = frame_number ^ 645798;
+    return  seed;
+}
+
+vec3 random_in_unit_sphere(inout uint seed) {
+    // Getting an angle and a height to sind a random vector in a unit sphere
+    const float PI_2 = 6.283185307179586;
+    // creates 2 16 bit random numbers between 0 & 1
+    vec2 zero_to_one = vec2((uvec2(random_u32(seed)) >> uvec2(0, 16)) & 65535) / 65536.0;
+    float horizontal_plane_angle = zero_to_one.x * PI_2;
+    // From -1 to 1
+    float height = zero_to_one.y * 2 - 1;
+    float horizontal_plane_length = sqrt(1 - height * height); // r = 1.0, r = horizontal_plan_length^2 + height^2, therefore horizontal_plan_length = sqrt(1-height^2)
+    return vec3(sin(horizontal_plane_angle) * horizontal_plane_length,height,cos(horizontal_plane_angle) * horizontal_plane_length);
+}

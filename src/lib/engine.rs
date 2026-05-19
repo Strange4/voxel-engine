@@ -3,7 +3,6 @@ mod engine_parts;
 mod push_constants;
 
 use egui_winit_vulkano::{Gui, GuiConfig};
-use glam::{Vec3, vec3};
 use std::path::Path;
 use std::sync::Arc;
 use vulkano::command_buffer::{
@@ -13,6 +12,7 @@ use vulkano::command_buffer::{
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::layout::DescriptorSetLayout;
 use vulkano::descriptor_set::{DescriptorSet, WriteDescriptorSet};
+use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::image::view::{ImageView, ImageViewCreateInfo};
 use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage};
@@ -63,7 +63,7 @@ pub struct WindowedEngine {
     should_record: Vec<bool>,
 
     // for setting which image the engine should render into
-    output_images: Vec<Arc<Image>>,
+    output_image: Arc<Image>,
     present_images_and_views: Vec<(Arc<Image>, Arc<ImageView>)>,
     descriptor_sets: Vec<Arc<DescriptorSet>>,
 
@@ -102,12 +102,8 @@ impl<T> Engine<T> {
     fn create_draw_to_image_command_buffer(
         // push_constants: PushConstants,
         descriptor_set: Arc<DescriptorSet>,
-        // allocator: Arc<StandardCommandBufferAllocator>,
         output_image: &Arc<Image>,
         engine_parts: &EngineParts,
-        // queue: &Arc<Queue>,
-        // pipeline: Arc<ComputePipeline>,
-        // query_pool: &Arc<QueryPool>,
         should_write_timestamp: bool,
         timestamp_index: u32,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
@@ -180,15 +176,10 @@ impl<T> Engine<T> {
         builder
     }
 
-    /// Creates the descriptor set of image views that are used by the shader. Also creates the output images that are written into by the shader
-    fn create_descriptor_set_and_output_image(
-        output_image_extent: &[u32; 2],
-        model_data: &ModelData,
-        allocator: Arc<StandardMemoryAllocator>,
-        descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
-        descriptor_set_layout: Arc<DescriptorSetLayout>,
-    ) -> (Arc<DescriptorSet>, Arc<Image>) {
-        let output_image = Image::new(
+    fn create_output_image(output_image_extent: &[u32; 2], device: Arc<Device>) -> Arc<Image> {
+        let allocator = Arc::new(StandardMemoryAllocator::new_default(device));
+
+        Image::new(
             allocator,
             ImageCreateInfo {
                 format: Format::R8G8B8A8_UNORM,
@@ -202,10 +193,17 @@ impl<T> Engine<T> {
                 ..Default::default()
             },
         )
-        .unwrap();
+        .unwrap()
+    }
 
+    fn create_descriptor_set(
+        descriptor_set_allocator: Arc<StandardDescriptorSetAllocator>,
+        descriptor_set_layout: Arc<DescriptorSetLayout>,
+        output_image: Arc<Image>,
+        model_data: &ModelData,
+    ) -> Arc<DescriptorSet> {
         let output_image_view = ImageView::new_default(output_image.clone()).unwrap();
-        let descriptor_set = DescriptorSet::new(
+        DescriptorSet::new(
             descriptor_set_allocator,
             descriptor_set_layout,
             [
@@ -216,9 +214,7 @@ impl<T> Engine<T> {
             ],
             [],
         )
-        .unwrap();
-
-        (descriptor_set, output_image)
+        .unwrap()
     }
 }
 
@@ -275,7 +271,7 @@ impl Engine<HeadlessEngine> {
     }
 
     pub fn draw(&mut self) -> Option<f64> {
-        self.renderer.draw(&self.engine_parts)
+        self.renderer.draw(&mut self.engine_parts)
     }
 }
 
@@ -320,7 +316,7 @@ impl HeadlessEngine {
     ///
     /// Because of the differences between a windowed engine, comparing benchmarks
     /// should only be done with other benchmarks of this function.
-    fn draw(&mut self, engine_parts: &EngineParts) -> Option<f64> {
+    fn draw(&mut self, engine_parts: &mut EngineParts) -> Option<f64> {
         let previous_future = match self.fence.take() {
             None => {
                 let mut now = sync::now(engine_parts.device.clone());
@@ -368,6 +364,8 @@ impl HeadlessEngine {
             return None;
         }
 
+        engine_parts.push_contants.increment_frame_number();
+
         Some(time)
     }
 
@@ -382,17 +380,17 @@ impl HeadlessEngine {
             Default::default(),
         ));
 
-        let allocator = Arc::new(StandardMemoryAllocator::new_default(
-            engine_parts.device.clone(),
-        ));
+        let output_image =
+            Engine::<Self>::create_output_image(image_size, engine_parts.device.clone());
 
-        Engine::<Self>::create_descriptor_set_and_output_image(
-            image_size,
-            &engine_parts.model_data,
-            allocator,
+        let descriptor_set = Engine::<Self>::create_descriptor_set(
             descriptor_set_allocator,
             descriptor_set_layout.clone(),
-        )
+            output_image.clone(),
+            &engine_parts.model_data,
+        );
+
+        (descriptor_set, output_image)
     }
 }
 
@@ -430,8 +428,8 @@ impl WindowedEngine {
             images.len() as u32 * MAX_TIMESTAMP_QUERIES_PER_IMAGE,
         );
 
-        let (descriptor_sets, output_images) =
-            Self::create_descriptor_sets_and_output_images(images.len() as u32, &engine_parts);
+        let (descriptor_sets, output_image) =
+            Self::create_descriptor_sets_and_output_image(images.len() as u32, &engine_parts);
 
         let images_and_views = Self::create_views_from_images(images);
 
@@ -461,7 +459,7 @@ impl WindowedEngine {
             previous_fence: 0,
             fences,
             should_record: vec![true; images_and_views.len()],
-            output_images,
+            output_image,
             present_images_and_views: images_and_views,
             descriptor_sets,
             gui,
@@ -511,7 +509,7 @@ impl WindowedEngine {
             self.present_images_and_views[swap_image_index as usize]
                 .0
                 .clone(),
-            self.output_images[swap_image_index as usize].clone(),
+            self.output_image.clone(),
             engine_parts,
             swap_image_index,
             self.should_record[swap_image_index as usize],
@@ -556,6 +554,7 @@ impl WindowedEngine {
         self.fences[swap_image_index as usize] = future;
 
         self.previous_fence = swap_image_index as usize;
+        engine_parts.push_contants.increment_frame_number();
     }
 
     /// Returns true when the event should NOT be passed to the rest of the renderer. False when it should
@@ -588,12 +587,12 @@ impl WindowedEngine {
     }
 
     fn handle_output_resize(&mut self, engine_parts: &mut EngineParts) {
-        let (descriptor_sets, output_images) = Self::create_descriptor_sets_and_output_images(
+        let (descriptor_sets, output_image) = Self::create_descriptor_sets_and_output_image(
             self.present_images_and_views.len() as u32,
             engine_parts,
         );
 
-        self.output_images = output_images;
+        self.output_image = output_image;
         self.descriptor_sets = descriptor_sets;
 
         engine_parts.push_contants = PushConstants::new(
@@ -642,10 +641,29 @@ impl WindowedEngine {
         Some((swap_image_index, acquire_future))
     }
 
-    fn create_descriptor_sets_and_output_images(
+    fn create_descriptor_sets_and_output_image(
         number_of_present_images: u32,
         engine_parts: &EngineParts,
-    ) -> (Vec<Arc<DescriptorSet>>, Vec<Arc<Image>>) {
+    ) -> (Vec<Arc<DescriptorSet>>, Arc<Image>) {
+        let output_image = Engine::<Self>::create_output_image(
+            &engine_parts.image_size,
+            engine_parts.device.clone(),
+        );
+
+        let descriptor_sets = Self::create_descriptor_sets(
+            number_of_present_images,
+            engine_parts,
+            output_image.clone(),
+        );
+
+        (descriptor_sets, output_image)
+    }
+
+    fn create_descriptor_sets(
+        number_of_present_images: u32,
+        engine_parts: &EngineParts,
+        output_image: Arc<Image>,
+    ) -> Vec<Arc<DescriptorSet>> {
         let pipeline_layout = engine_parts.compute_pipeline.layout();
         let descriptor_set_layout = pipeline_layout.set_layouts().first().unwrap();
         let descriptor_set_allocator = Arc::new(StandardDescriptorSetAllocator::new(
@@ -653,25 +671,16 @@ impl WindowedEngine {
             Default::default(),
         ));
 
-        let allocator = Arc::new(StandardMemoryAllocator::new_default(
-            engine_parts.device.clone(),
-        ));
-
-        let mut descriptor_sets = Vec::new();
-        let mut output_images = Vec::new();
-
-        for _ in 0..number_of_present_images {
-            let (descriptor_set, image) = Engine::<Self>::create_descriptor_set_and_output_image(
-                &engine_parts.image_size,
-                &engine_parts.model_data,
-                allocator.clone(),
-                descriptor_set_allocator.clone(),
-                descriptor_set_layout.clone(),
-            );
-            descriptor_sets.push(descriptor_set);
-            output_images.push(image);
-        }
-        (descriptor_sets, output_images)
+        (0..number_of_present_images)
+            .map(|_| {
+                Engine::<Self>::create_descriptor_set(
+                    descriptor_set_allocator.clone(),
+                    descriptor_set_layout.clone(),
+                    output_image.clone(),
+                    &engine_parts.model_data,
+                )
+            })
+            .collect()
     }
 
     fn create_views_from_images(images: Vec<Arc<Image>>) -> Vec<(Arc<Image>, Arc<ImageView>)> {
@@ -728,96 +737,4 @@ impl WindowedEngine {
 
         builder.build().unwrap()
     }
-}
-
-fn get_sphere_model(cube_side_length: u32) -> Vec<u8> {
-    let diameter = cube_side_length as usize;
-    let bytes_per_voxel = 4;
-    let mut data = vec![0; diameter * diameter * diameter * bytes_per_voxel];
-    let radius = diameter / 2;
-    for z in 0..diameter {
-        for y in 0..diameter {
-            for x in 0..diameter {
-                let x_dist = radius.abs_diff(x);
-                let y_dist = radius.abs_diff(y);
-                let z_dist = radius.abs_diff(z);
-                if (x_dist * x_dist + y_dist * y_dist + z_dist * z_dist) <= (radius * radius) {
-                    let begin = z * diameter * diameter * bytes_per_voxel
-                        + y * diameter * bytes_per_voxel
-                        + x * bytes_per_voxel;
-                    let color = ((x + y + z) % 2) * 0xb8bb26;
-
-                    data[begin] = ((color & 0xFF0000) >> 16) as u8; // red;
-                    data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // blue;
-                    data[begin + 2] = (color & 0x0000FF) as u8; // green;
-                    data[begin + 3] = 0xFF; // alpha
-                }
-            }
-        }
-    }
-    data
-}
-
-fn get_bulb_model(cube_side_length: u32) -> Vec<u8> {
-    let cube_side_length = cube_side_length as usize;
-    let bytes_per_voxel = 4;
-    let mut data =
-        vec![0; cube_side_length * cube_side_length * cube_side_length * bytes_per_voxel];
-    let max_mandel_distance = 1.25;
-    for z in 0..cube_side_length {
-        for y in 0..cube_side_length {
-            for x in 0..cube_side_length {
-                let maped_x = (x as f32 / cube_side_length as f32) * max_mandel_distance * 2.0
-                    - max_mandel_distance;
-                let maped_y = (y as f32 / cube_side_length as f32) * max_mandel_distance * 2.0
-                    - max_mandel_distance;
-                let mapped_z = (z as f32 / cube_side_length as f32) * max_mandel_distance * 2.0
-                    - max_mandel_distance;
-                if point_is_part_of_mandelbulb(vec3(maped_x, maped_y, mapped_z)) {
-                    let begin = z * cube_side_length * cube_side_length * bytes_per_voxel
-                        + y * cube_side_length * bytes_per_voxel
-                        + x * bytes_per_voxel;
-                    let color = ((x + y + z) % 2) * 0xb8bb26;
-
-                    data[begin] = ((color & 0xFF0000) >> 16) as u8; // red;
-                    data[begin + 1] = ((color & 0x00FF00) >> 8) as u8; // green;
-                    data[begin + 2] = (color & 0x0000FF) as u8; // blue;
-                    data[begin + 3] = 0xFF; // alpha
-                }
-            }
-        }
-    }
-
-    data
-}
-
-fn point_is_part_of_mandelbulb(point: Vec3) -> bool {
-    let mut result = point.clone();
-
-    let max_iters = 4;
-    for _ in 0..max_iters {
-        // I have no idea how this works
-        let (x, y, z) = (result.x, result.y, result.z);
-        let (x2, y2, z2) = (x * x, y * y, z * z);
-        let (x4, y4, z4) = (x2 * x2, y2 * y2, z2 * z2);
-
-        let k3 = x2 + z2;
-        let k2 = 1.0 / (k3 * k3 * k3 * k3 * k3 * k3 * k3).sqrt();
-        let k1 = x4 + y4 + z4 - 6.0 * y2 * z2 - 6.0 * x2 * y2 + 2.0 * z2 * x2;
-        let k4 = x2 - y2 + z2;
-        result.x = 64.0 * x * y * z * (x2 - z2) * k4 * (x4 - 6.0 * x2 * z2 + z4) * k1 * k2;
-        result.y = -16.0 * y2 * k3 * k4 * k4 + k1 * k1;
-        result.z = -8.0
-            * y
-            * k4
-            * (x4 * x4 - 28.0 * x4 * x2 * z2 + 70.0 * x4 * z4 - 28.0 * x2 * z2 * z4 + z4 * z4)
-            * k1
-            * k2;
-
-        result += point;
-        if result.length_squared() > 256.0 {
-            return false;
-        }
-    }
-    true
 }

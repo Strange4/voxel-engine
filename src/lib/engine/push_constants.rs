@@ -15,6 +15,7 @@ pub struct PushConstants {
     camera_y: f32,
     pixel_delta_down: Vec3,
     camera_z: f32,
+    frame_number: u32,
     shader_flags: u8,
     model_scale: u8,
 }
@@ -62,6 +63,11 @@ impl PushConstants {
             camera_z: camera_center.z,
             shader_flags,
             model_scale: model_data.model_scale,
+            frame_number: 0,
         }
+    }
+
+    pub fn increment_frame_number(&mut self) {
+        self.frame_number += 1;
     }
 }

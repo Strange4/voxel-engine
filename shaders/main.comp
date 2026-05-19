@@ -9,18 +9,53 @@
 #include "gradient.comp"
 
 void main() {
-    vec2 imgSize = vec2(imageSize(out_image));
+    uvec2 imgSize = uvec2(imageSize(out_image));
     if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
+
+    uint random_seed = generate_seed(gl_GlobalInvocationID.xy, push_constants.frame_number);
 
     Ray ray = generate_ray(push_constants);
     bool show_steps = bool((push_constants.shader_flags >> 0) & 1);
     bool show_normals = bool((push_constants.shader_flags >> 1) & 1);
     bool show_hit_position = bool((push_constants.shader_flags >> 2) & 1);
 
+
+    // BOUNCE!
+
+    // const vec3 sky_color = vec3(1);
+    // vec3 color = vec3(1);
+    // uint bounce_number;
+    // for(bounce_number=0;bounce_number<3;bounce_number++) {
+    //     HitInfo hit = cast_ray(push_constants.model_scale, ray);
+
+    //     if(hit.hit) {
+    //         // The first byte should be `a` but its being interpreted as r
+    //         u8vec4 abgr_color = color_palette.palette[hit.palette_index];
+    //         color += vec3(abgr_color.wzy) / 255; // floating point image type
+    //     } else {
+    //         color += sky_color;
+    //         break;
+    //     }
+
+    //     ray.direction = normalize(hit.normal + random_in_unit_sphere(random_seed));
+    //     ray.origin = hit.position;
+    // }
+
+    // color /= (bounce_number + 1);
+
+    // float weight = 1.0 / (push_constants.frame_number + 1);
+
+    // vec3 previous_color = imageLoad(out_image, ivec2(gl_GlobalInvocationID.xy)).xyz;
+
+    // imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(mix(previous_color, color, weight), 1));
+
+
+    // NO BOUNCE
+
+    vec4 color = vec4(vec3(0.156862745), 1);
+    uint side_length = 1 << (push_constants.model_scale * 2);
     HitInfo hit = cast_ray(push_constants.model_scale, ray);
 
-    uint side_length = 1 << (push_constants.model_scale * 2);
-    vec4 color;
     if(hit.hit) {
         if(show_steps) {
             color = vec4(magma_quintic(float(hit.number_of_steps) / float(side_length)), 1.0);
@@ -33,8 +68,8 @@ void main() {
             u8vec4 abgr_color = color_palette.palette[hit.palette_index];
             color = vec4(abgr_color.wzyx) / 255; // floating point image type
         }
-    } else {
-        color = vec4(vec3(0.156862745), 1);
     }
+
+    
     imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), color);
 }

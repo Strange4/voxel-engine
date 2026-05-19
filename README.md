@@ -1,5 +1,7 @@
 # TODO
 
+###
+
 ### Add multiple bounces and diffuse materials
 
 ### Add focal blur setting
@@ -93,6 +95,7 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 # DONE
 
+- [x] Have only 1 output image instead of many
 - [x] Debug 64 tree traversal
 - [x] Implement 64 tree traveral: Sweet sweet 66% frame improvement from this. Frame from 90ms to 30ms babyyy
 - [x] Add output image resolution change
@@ -114,6 +117,22 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 
 - [Xima](https://www.youtube.com/@xima1)
 
+# Build requirements on windows
+
+- [Vulkan SDK](https://vulkan.lunarg.com/sdk/home): With the shader toolchain debug symbols
+
+OR
+
+- [CMake](https://cmake.org/download/)
+- [Ninja](https://github.com/ninja-build/ninja/releases)
+- [Python](https://www.python.org/downloads/)
+
+Then run with `CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo run` since shaderc has a minimum version incompatilibiliy with CMake if you're running an up to date version of CMake.
+
+We need all of these because `vulkan_shaders` uses shaderc wich is a C++ lib. You can either download the exe (which they don't provide supported binaries for, like the link doesn't event work anymore) or build it from source. Building from source requires CMake, Ninja & Python. Or.... you could download the Vulkan SDK (3.09GB) which is quite a lot.
+
+I could use naga to compile the shaders manually and try to setup all the code to create the right spirv options. But this would mean to also not use the `egui_winit_vulkano` crate (because they use vulkano_shaders too). Which would also mean that I would need to recreate the egui integration. This is a lot of code that isn't the focus of this application.
+
 # References
 
 - [Vox models and file format](https://github.com/ephtracy/voxel-model/tree/master)
@@ -131,35 +150,3 @@ Read up on previous question. The layout of a descriptor set is an array of all 
 - [GLSL functions](https://docs.gl/)
 - [Slab intersection visualizer](https://www.mathematik.uni-marburg.de/~thormae/lectures/graphics2/graphics_2_2_eng_web.html#20)
 - [Unitiy builds for shader includes](https://austinmorlan.com/posts/unity_jumbo_build/): I'm not sure if it would benefit for compiling performance. But it really reduces the headache to import and see what is defined. + I don't need #ifndef and more macros.
-
-# How to?
-
-### Setup Nvidia nsight aftermath for crash reports.
-
-- 00: make sure that you have the [nvidia drivers](https://wiki.debian.org/NvidiaGraphicsDrivers) installed.
-- 0: make sure that your shader debug info is included (in Cargo.toml)
-- 1: run `/opt/nvidia/nsight-graphics-for-linux/nsight-graphics-for-linux-2025.4.1.0/host/linux-desktop-nomad-x64/nv-aftermath-monitor --crashdump-dir ~/ --debuginfo-dir ~/ --prompt-on-crash true`. This will be run in the background and have it monitor for crashes.
-- 2: run `/opt/nvidia/nsight-graphics-for-linux/nsight-graphics-for-linux-2025.4.1.0/host/linux-desktop-nomad-x64/nv-aftermath-control --debuginfo true --shader-error-reporting true --mode Global`. This will set the right settings
-- 3: open the application and recreate the settings
-- 4: click on the prompt that appears to open the crash dump in nsight graphics
-
-### Use renderdoc
-
-- 1. Make sure you run with the command environment variable set to `WAYLAND_DISPLAY= XDG_SESSION_TYPE=x11 ./qrenderdoc`
-- 2. Run and use renderdoc
-
-# Build requirements on windows
-
-- [Vulkan SDK](https://vulkan.lunarg.com/sdk/home): With the shader toolchain debug symbols
-
-OR
-
-- [CMake](https://cmake.org/download/)
-- [Ninja](https://github.com/ninja-build/ninja/releases)
-- [Python](https://www.python.org/downloads/)
-
-Then run with `CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo run` since shaderc has a minimum version incompatilibiliy with CMake if you're running an up to date version of CMake.
-
-We need all of these because `vulkan_shaders` uses shaderc wich is a C++ lib. You can either download the exe (which they don't provide supported binaries for, like the link doesn't event work anymore) or build it from source. Building from source requires CMake, Ninja & Python. Or.... you could download the Vulkan SDK (3.09GB) which is quite a lot.
-
-I could use naga to compile the shaders manually and try to setup all the code to create the right spirv options. But this would mean to also not use the `egui_winit_vulkano` crate (because they use vulkano_shaders too). Which would also mean that I would need to recreate the egui integration. This is a lot of code that isn't the focus of this application.
