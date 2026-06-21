@@ -101,8 +101,8 @@ impl ApplicationHandler for App {
 
 impl App {
     pub fn new() -> Self {
-        let mut camera = Camera::new_at(0.0, 0.0, 0.0);
-        camera.direction = Vec3::new(1.0, 1.0, 1.0).normalize();
+        let mut camera = Camera::new_at(5.0, 5.0, -5.0);
+        camera.direction = Vec3::new(0.0, 0.0, 1.0).normalize();
         Self {
             window: None,
             engine: None,
@@ -281,7 +281,7 @@ impl App {
         egui::Window::new("Settings")
             .anchor(Align2::LEFT_TOP, [5.0, 5.0])
             .show(&ctx, |ui| {
-                ui.label(format!("Rendering Time: {render_time_ms:.3}ms"));
+                ui.label(format!("Rendering Time: {render_time_ms:0>6.3}ms"));
 
                 ui.collapsing("Image", |ui| {
                     ui.horizontal(|ui| {
@@ -304,6 +304,11 @@ impl App {
 
                 // Camera Drawing
                 ui.collapsing("Camera", |ui| {
+                    let position = settings.camera_settings.camera.position;
+                    ui.label(format!(
+                        "Position: ({:.2}, {:.2}, {:.2})",
+                        position.x, position.y, position.z
+                    ));
                     ui.add(
                         Slider::new(&mut settings.camera_settings.speed, 0.0..=100.0).text("Speed"),
                     );

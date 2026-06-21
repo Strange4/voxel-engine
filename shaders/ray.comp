@@ -44,7 +44,7 @@ uint random_u32(inout uint seed) {
 uint generate_seed(uvec2 uv, uint frame_number) {
     uint seed = uv.x ^ (uv.y << 16);
     seed = random_u32(seed);
-    seed = frame_number ^ 645798;
+    seed ^= frame_number * 1234;
     return  seed;
 }
 

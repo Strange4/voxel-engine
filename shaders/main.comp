@@ -22,54 +22,38 @@ void main() {
 
     // BOUNCE!
 
-    // const vec3 sky_color = vec3(1);
-    // vec3 color = vec3(1);
-    // uint bounce_number;
-    // for(bounce_number=0;bounce_number<3;bounce_number++) {
-    //     HitInfo hit = cast_ray(push_constants.model_scale, ray);
+    // const vec3 sky_color = vec3(0.156862745);
+    const vec3 sky_color = vec3(1);
+    const vec3 material_emission = vec3(0);
+    uint bounce_number;
+    uint max_hits = 2;
+    vec3 final_light_color = vec3(0);
+    vec3 throughput = vec3(1);
 
-    //     if(hit.hit) {
-    //         // The first byte should be `a` but its being interpreted as r
-    //         u8vec4 abgr_color = color_palette.palette[hit.palette_index];
-    //         color += vec3(abgr_color.wzy) / 255; // floating point image type
-    //     } else {
-    //         color += sky_color;
-    //         break;
-    //     }
+    for(bounce_number=0;bounce_number<max_hits;bounce_number++) {
+        HitInfo hit = cast_ray(push_constants.model_scale, ray);
 
-    //     ray.direction = normalize(hit.normal + random_in_unit_sphere(random_seed));
-    //     ray.origin = hit.position;
-    // }
-
-    // color /= (bounce_number + 1);
-
-    // float weight = 1.0 / (push_constants.frame_number + 1);
-
-    // vec3 previous_color = imageLoad(out_image, ivec2(gl_GlobalInvocationID.xy)).xyz;
-
-    // imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(mix(previous_color, color, weight), 1));
-
-
-    // NO BOUNCE
-
-    vec4 color = vec4(vec3(0.156862745), 1);
-    uint side_length = 1 << (push_constants.model_scale * 2);
-    HitInfo hit = cast_ray(push_constants.model_scale, ray);
-
-    if(hit.hit) {
-        if(show_steps) {
-            color = vec4(magma_quintic(float(hit.number_of_steps) / float(side_length)), 1.0);
-        } else if(show_normals) {
-            color = vec4(hit.normal, 1);
-        } else if (show_hit_position)  {
-            color = vec4(hit.position / float(side_length), 1);
-        } else {
+        if(hit.hit) {
             // The first byte should be `a` but its being interpreted as r
             u8vec4 abgr_color = color_palette.palette[hit.palette_index];
-            color = vec4(abgr_color.wzyx) / 255; // floating point image type
+            vec3 surface_color = vec3(abgr_color.wzy) / 255; // floating point image type
+            // the color only contributes as much as the total reflectance of all the surfaces we've hit before allow
+            final_light_color += material_emission * throughput;
+
+            // the next bounce will be attenuated by the reflectance of this surface
+            throughput *= surface_color;
+        } else {
+            final_light_color += sky_color * throughput;
+            break;
         }
+
+        ray.direction = normalize(hit.normal + random_in_unit_sphere(random_seed));
+        ray.origin = hit.position + hit.normal * 0.0001;
     }
 
-    
-    imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), color);
+    float weight = 1.0 / (push_constants.frame_number + 1);
+
+    vec3 previous_color = imageLoad(out_image, ivec2(gl_GlobalInvocationID.xy)).xyz;
+
+    imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(mix(previous_color, final_light_color, weight), 1));
 }
