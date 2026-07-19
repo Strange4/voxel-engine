@@ -16,6 +16,7 @@ bench = false
 [dependencies]
 egui = "0.31"
 egui_winit_vulkano = "0.28.0"
+egui-file-dialog = "0.10.0"
 glam = { version = "0.30.8", features = ["bytemuck"]}
 vulkano = "0.35"
 # vulkano-shaders = { version = "0.35.0" }

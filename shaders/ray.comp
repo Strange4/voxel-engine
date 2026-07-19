@@ -59,3 +59,8 @@ vec3 random_in_unit_sphere(inout uint seed) {
     float horizontal_plane_length = sqrt(1 - height * height); // r = 1.0, r = horizontal_plan_length^2 + height^2, therefore horizontal_plan_length = sqrt(1-height^2)
     return vec3(sin(horizontal_plane_angle) * horizontal_plane_length,height,cos(horizontal_plane_angle) * horizontal_plane_length);
 }
+
+float ray_ground_intersection(Ray ray, float model_height) {
+    float t = (model_height - ray.origin.y) / ray.direction.y;
+    return t;
+}

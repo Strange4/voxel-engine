@@ -1,10 +1,13 @@
-use egui::{Align2, Slider};
+use egui::{Align2, Slider, Ui};
+use egui_file_dialog::FileDialog;
 use egui_winit_vulkano::Gui;
 use glam::Vec3;
-use std::{collections::HashSet, f32, sync::Arc, time::Instant};
+use std::{collections::HashSet, f32, path::Path, sync::Arc, thread, time::Instant};
 use voxel_engine::{
     camera::Camera,
     engine::{Engine, WindowedEngine},
+    voxel_data::XYZIVoxelData,
+    voxel_loader::VoxFile,
 };
 use winit::{
     application::ApplicationHandler,
@@ -20,6 +23,7 @@ pub struct App {
     settings: AppSettings,
     held_down_keys: HashSet<KeyCode>,
     last_draw_time: Instant,
+    file_dialog: FileDialog,
 }
 
 impl ApplicationHandler for App {
@@ -73,7 +77,12 @@ impl ApplicationHandler for App {
                 // render the frame + gui
                 let rendering_time_ns = engine.image_draw_time_ns();
                 engine.draw_with_gui(window, |gui| {
-                    Self::render_gui(gui, &mut self.settings, rendering_time_ns);
+                    Self::render_gui(
+                        gui,
+                        &mut self.settings,
+                        rendering_time_ns,
+                        &mut self.file_dialog,
+                    );
                 });
 
                 window.request_redraw();
@@ -101,6 +110,10 @@ impl ApplicationHandler for App {
 
 impl App {
     pub fn new() -> Self {
+        let model = XYZIVoxelData::from_vox_file(
+            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
+        )
+        .unwrap();
         let mut camera = Camera::new_at(5.0, 5.0, -5.0);
         camera.direction = Vec3::new(0.0, 0.0, 1.0).normalize();
         Self {
@@ -122,9 +135,14 @@ impl App {
                     resolution_multiplier: 1.0,
                     has_changed: true,
                 },
+                model_settings: ModelSettings {
+                    model: Some(model),
+                    has_changed: true,
+                },
             },
             held_down_keys: HashSet::new(),
             last_draw_time: Instant::now(),
+            file_dialog: FileDialog::new(),
         }
     }
 
@@ -139,9 +157,14 @@ impl App {
     }
 
     fn handle_free_camera_movement(&mut self, delta_time: f32) -> bool {
-        let rotation_speed = self.settings.camera_settings.speed * 0.1 * delta_time;
-        let translation_speed = self.settings.camera_settings.speed * delta_time;
         let held_keys = &self.held_down_keys;
+        let speed_boost = if held_keys.contains(&KeyCode::ShiftLeft) {
+            1.5
+        } else {
+            1.0
+        };
+        let rotation_speed = self.settings.camera_settings.speed * 0.1 * delta_time * speed_boost;
+        let translation_speed = self.settings.camera_settings.speed * delta_time * speed_boost;
         let mut handled = false;
 
         if held_keys.contains(&KeyCode::ArrowRight) {
@@ -219,10 +242,14 @@ impl App {
 
     fn handle_spherical_camera_movement(&mut self, delta_time: f32) -> bool {
         let center = Vec3::ZERO;
-        let radial_speed = self.settings.camera_settings.speed * 0.1 * delta_time;
-        let translation_speed = self.settings.camera_settings.speed * delta_time;
-
         let held_keys = &self.held_down_keys;
+        let speed_boost = if held_keys.contains(&KeyCode::ShiftLeft) {
+            1.5
+        } else {
+            1.0
+        };
+        let radial_speed = self.settings.camera_settings.speed * 0.1 * delta_time * speed_boost;
+        let translation_speed = self.settings.camera_settings.speed * delta_time * speed_boost;
 
         let mut handled = false;
 
@@ -272,7 +299,12 @@ impl App {
         handled
     }
 
-    fn render_gui(gui: &mut Gui, settings: &mut AppSettings, rendering_time_ns: f64) {
+    fn render_gui(
+        gui: &mut Gui,
+        settings: &mut AppSettings,
+        rendering_time_ns: f64,
+        file_dialog: &mut FileDialog,
+    ) {
         let ctx = gui.context();
         let render_time_ms = rendering_time_ns / 1_000_000.0;
         let mut camera_changed = false;
@@ -282,6 +314,14 @@ impl App {
             .anchor(Align2::LEFT_TOP, [5.0, 5.0])
             .show(&ctx, |ui| {
                 ui.label(format!("Rendering Time: {render_time_ms:0>6.3}ms"));
+
+                if ui.button("Set Model").clicked() {
+                    file_dialog.pick_file();
+                }
+
+                file_dialog.update(&ctx);
+
+                Self::handle_file_dialog(file_dialog, ui, settings);
 
                 ui.collapsing("Image", |ui| {
                     ui.horizontal(|ui| {
@@ -368,6 +408,40 @@ impl App {
         if self.settings.image_settings.has_changed {
             engine.resize_output_image(self.settings.image_settings.output_image_size());
         }
+        if self.settings.model_settings.has_changed {
+            let model = self.settings.model_settings.model.take();
+            if let Some(model) = model {
+                engine.set_model(model);
+            }
+            self.settings.model_settings.has_changed = false;
+        }
+    }
+
+    fn handle_file_dialog(file_dialog: &mut FileDialog, ui: &mut Ui, settings: &mut AppSettings) {
+        let path = file_dialog.take_picked();
+        if path.is_none() {
+            return;
+        }
+        let path = path.unwrap();
+        let vox_file = VoxFile::load_vox_file(&path);
+        if vox_file.is_err() {
+            ui.label(format!(
+                "Failed to load vox file: {:?}",
+                vox_file.err().unwrap()
+            ));
+            return;
+        }
+        let vox_file = vox_file.unwrap();
+        let model = XYZIVoxelData::from_vox_file(vox_file);
+
+        if model.is_err() {
+            ui.label(format!("Failed to load model: {:?}", model.err().unwrap()));
+            return;
+        }
+        let model = model.unwrap();
+
+        settings.model_settings.model = Some(model);
+        settings.model_settings.has_changed = true;
     }
 }
 
@@ -375,12 +449,18 @@ struct AppSettings {
     camera_settings: CameraSettings,
     shader_settings: ShaderSettings,
     image_settings: ImageSettings,
+    model_settings: ModelSettings,
 }
 
 struct CameraSettings {
     camera_centered: bool,
     speed: f32,
     camera: Camera,
+    has_changed: bool,
+}
+
+struct ModelSettings {
+    model: Option<XYZIVoxelData>,
     has_changed: bool,
 }
 

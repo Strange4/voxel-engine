@@ -36,15 +36,15 @@ impl XYZIVoxelData {
             .try_into()
             .map_err(|e| VoxelDataError::TransformChunkError(format!("{e:?}")))?;
 
-        let max_voxel_position = xyzi_chunk.voxels().iter().max_by(|&a, &b| {
-            let a_distance = a.x() as u32 * a.x() as u32
-                + a.y() as u32 * a.y() as u32
-                + a.z() as u32 * a.z() as u32;
-            let b_distbnce = b.x() as u32 * b.x() as u32
-                + b.y() as u32 * b.y() as u32
-                + b.z() as u32 * b.z() as u32;
-            a_distance.cmp(&b_distbnce)
-        });
+        let max_voxel_position = xyzi_chunk
+            .voxels()
+            .iter()
+            .max_by(|&a, &b| a.xyz().length_squared().cmp(&b.xyz().length_squared()));
+
+        let lowest_voxel = xyzi_chunk
+            .voxels()
+            .iter()
+            .min_by(|&a, &b| a.y().cmp(&b.y()));
 
         // Verify that some voxels aren't out of bounds
         if let Some(voxel) = max_voxel_position
@@ -55,7 +55,7 @@ impl XYZIVoxelData {
             return Err(VoxelDataError::VoxelOutOfBounds);
         };
 
-        let color_palette = if let Some(rgba_chunk) = main_chunk.find_child("RGBA") {
+        let mut color_palette = if let Some(rgba_chunk) = main_chunk.find_child("RGBA") {
             let chunk: RGBAChunk = rgba_chunk
                 .try_into()
                 .map_err(|e| VoxelDataError::TransformChunkError(format!("{e:?}")))?;
@@ -64,6 +64,12 @@ impl XYZIVoxelData {
         } else {
             DEFAULT_PALETTE
         };
+
+        if let Some(voxel) = lowest_voxel {
+            color_palette[0] = color_palette[voxel.i() as usize];
+        } else {
+            color_palette[0] = 0xb2c553ff;
+        }
 
         Ok(Self {
             // the Y and Z axis are inversed from the .vox file format and the vulkan coordinate system

@@ -30,8 +30,8 @@ struct PushConstants {
     uint frame_number;
     uint8_t shader_flags;
     uint8_t model_scale;
-    uint8_t padding_for_pc_range;
-    uint8_t padding_for_pc_range2;
+    uint8_t floor_position;
+    uint8_t sun_elevation;
 };
 
 layout(std430, push_constant) uniform PushConstantBlock {

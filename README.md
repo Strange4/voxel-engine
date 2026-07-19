@@ -150,3 +150,4 @@ I could use naga to compile the shaders manually and try to setup all the code t
 - [GLSL functions](https://docs.gl/)
 - [Slab intersection visualizer](https://www.mathematik.uni-marburg.de/~thormae/lectures/graphics2/graphics_2_2_eng_web.html#20)
 - [Unitiy builds for shader includes](https://austinmorlan.com/posts/unity_jumbo_build/): I'm not sure if it would benefit for compiling performance. But it really reduces the headache to import and see what is defined. + I don't need #ifndef and more macros.
+- [Downloadable voxel models](https://github.com/enkisoftware/voxel-models#other-voxel-resources)

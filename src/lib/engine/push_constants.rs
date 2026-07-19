@@ -18,6 +18,8 @@ pub struct PushConstants {
     frame_number: u32,
     shader_flags: u8,
     model_scale: u8,
+    floor_position: u8,
+    sun_elevation: u8,
 }
 
 impl PushConstants {
@@ -64,6 +66,8 @@ impl PushConstants {
             shader_flags,
             model_scale: model_data.model_scale,
             frame_number: 0,
+            floor_position: model_data.floor_position,
+            sun_elevation: 90,
         }
     }
 

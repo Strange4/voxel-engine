@@ -155,9 +155,26 @@ HitInfo traverse_scene(Ray ray) {
     return info;
 }
 
+HitInfo check_ground_intersection(Ray ray, uint8_t floor_position) {
+    HitInfo info;
+    float t_ground = ray_ground_intersection(ray, float(floor_position));
+    if (t_ground > 0) {
+        // If we hit the ground, we need to create a hit info
+        info.hit = true;
+        info.position = ray.origin + ray.direction * t_ground;
+        info.palette_index = 0;
+        info.normal = vec3(0, -1, 0);
+        info.number_of_steps = 1;
+    } else {
+        info.hit = false;
+        info.number_of_steps = 0;
+    }
+    return info;
+}
+
 /// casts a ray into the world and returns that it sees
 /// Note that the ray must be in world coordinates instead of the [1.0..2.0) coordinate system used for traversal
-HitInfo cast_ray(uint model_scale, Ray ray) {
+HitInfo cast_ray(uint model_scale, uint8_t floor_position, Ray ray) {
     // TODO: profile this to see if I can get this faster
     uvec3 model_size = uvec3(1 << (model_scale * 2));
     vec3 model_min_position = vec3(0);
@@ -169,10 +186,7 @@ HitInfo cast_ray(uint model_scale, Ray ray) {
 
     // We're not even lookint at the model
     if (t_min >= t_max || t_max < 0) {
-        HitInfo info;
-        info.number_of_steps = 0;
-        info.hit = false;
-        return info;
+        return check_ground_intersection(ray, floor_position);
     }
 
     // the point is known to be "inside the box" if the tMin is negative
@@ -202,7 +216,10 @@ HitInfo cast_ray(uint model_scale, Ray ray) {
             normal[input_axis] = -sign(ray.direction)[input_axis] * 1;
             info.normal = normal;
         }
+    } else {
+        return check_ground_intersection(ray, floor_position);
     }
 
     return info;
 }
+

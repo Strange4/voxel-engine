@@ -1,3 +1,4 @@
+use glam::UVec3;
 use std::sync::Arc;
 use vulkano::{
     buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer},
@@ -17,6 +18,7 @@ use crate::{
     engine::{compute_shader, push_constants::PushConstants},
     svt::{Svt, SvtNode},
     voxel_data::XYZIVoxelData,
+    voxel_loader::DEFAULT_PALETTE,
 };
 
 pub struct EngineParts {
@@ -24,7 +26,7 @@ pub struct EngineParts {
     pub shader_flags: u8,
 
     // stuff that we want to precompute
-    pub push_contants: PushConstants,
+    pub push_constants: PushConstants,
     pub image_size: [u32; 2],
 
     // Vulkan nececities
@@ -81,7 +83,7 @@ impl EngineParts {
         EngineParts {
             camera,
             shader_flags: default_shader_flags,
-            push_contants,
+            push_constants: push_contants,
             device,
             queue,
             command_buffer_allocator,
@@ -120,16 +122,17 @@ pub struct ModelData {
     pub leaf_data: Subbuffer<[u8]>,
     pub color_palette: Subbuffer<[u32]>,
     pub model_scale: u8,
+    pub floor_position: u8,
 }
 
 impl ModelData {
-    pub fn new_from_vox_data(device: Arc<Device>, mut voxel_data: XYZIVoxelData) -> Self {
+    pub fn new(
+        device: Arc<Device>,
+        svt: Svt,
+        color_palette: [u32; 256],
+        floor_position: u8,
+    ) -> Self {
         let allocator = Arc::new(StandardMemoryAllocator::new_default(device));
-        let svt = Svt::from_voxel_data(&mut voxel_data);
-
-        // We could resize the entire color pallete to only the colors that are used to save memory
-        // But its 1KB anyway so doesn't matter much
-        let color_palette = voxel_data.color_palette();
 
         let nodes_buffer = Buffer::from_iter(
             allocator.clone(),
@@ -161,6 +164,8 @@ impl ModelData {
         )
         .expect("Couldn't create buffer");
 
+        // We could resize the entire color pallete to only the colors that are used to save memory
+        // But its 1KB anyway so doesn't matter much
         let color_palette_buffer = Buffer::from_iter(
             allocator.clone(),
             BufferCreateInfo {
@@ -181,6 +186,46 @@ impl ModelData {
             leaf_data: leaf_data_buffer,
             color_palette: color_palette_buffer,
             model_scale: svt.scale,
+            floor_position,
         }
+    }
+
+    pub fn new_from_vox_data(device: Arc<Device>, mut voxel_data: XYZIVoxelData) -> Self {
+        let svt = Svt::from_voxel_data(&mut voxel_data);
+        // Cap to 255 since we only load one object and the max size of an object is 255
+        let height = voxel_data.size().y.min(255) as u8;
+
+        let color_palette = voxel_data.color_palette();
+
+        Self::new(device, svt, color_palette, height)
+    }
+
+    pub fn sample_model(device: Arc<Device>) -> Self {
+        // its kinda like a sphere
+        #[rustfmt::skip]
+        const SAMPLE_VOXEL_DATA: [u8; 64] = [
+            0, 0, 0, 0,
+            0, 1, 1, 0,
+            0, 1, 1, 0,
+            0, 0, 0, 0,
+
+            0, 1, 1, 0,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            0, 1, 1, 0,
+
+            0, 1, 1, 0,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            0, 1, 1, 0,
+
+            0, 0, 0, 0,
+            0, 1, 1, 0,
+            0, 1, 1, 0,
+            0, 0, 0, 0,
+        ];
+        const SAMPLE_SIZE: UVec3 = UVec3::new(4, 4, 4);
+        let svt = Svt::build_tree(&SAMPLE_SIZE, &SAMPLE_VOXEL_DATA);
+        Self::new(device, svt, DEFAULT_PALETTE, SAMPLE_SIZE.y as u8)
     }
 }

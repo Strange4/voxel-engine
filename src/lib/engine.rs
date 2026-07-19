@@ -3,7 +3,6 @@ mod engine_parts;
 mod push_constants;
 
 use egui_winit_vulkano::{Gui, GuiConfig};
-use std::path::Path;
 use std::sync::Arc;
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, BlitImageInfo, CommandBufferExecFuture, CommandBufferUsage,
@@ -33,7 +32,6 @@ use crate::camera::Camera;
 use crate::engine::engine_parts::{EngineParts, ModelData};
 use crate::engine::push_constants::PushConstants;
 use crate::voxel_data::XYZIVoxelData;
-use crate::voxel_loader::VoxFile;
 use crate::vulkan::starter::{
     get_device_and_queue, get_headless_device_and_queue, get_headless_instance,
     get_physical_device_and_family_index, get_physical_device_and_family_index_for_surface,
@@ -88,7 +86,7 @@ impl<T> Engine<T> {
     }
 
     fn recompute_push_constants(&mut self) {
-        self.engine_parts.push_contants = PushConstants::new(
+        self.engine_parts.push_constants = PushConstants::new(
             &self.engine_parts.image_size,
             &self.engine_parts.camera,
             self.engine_parts.shader_flags,
@@ -121,7 +119,7 @@ impl<T> Engine<T> {
         builder
             .bind_pipeline_compute(pipeline)
             .unwrap()
-            .push_constants(pipeline_layout.clone(), 0, engine_parts.push_contants)
+            .push_constants(pipeline_layout.clone(), 0, engine_parts.push_constants)
             .unwrap()
             .bind_descriptor_sets(
                 PipelineBindPoint::Compute,
@@ -253,11 +251,21 @@ impl Engine<WindowedEngine> {
 
     pub fn resize_output_image(&mut self, new_size: [u32; 2]) {
         self.engine_parts.image_size = new_size;
-        self.renderer.handle_output_resize(&mut self.engine_parts);
+        self.renderer
+            .recreate_descriptor_sets(&mut self.engine_parts);
+        self.recompute_push_constants();
     }
 
     pub fn resize_window(&mut self, window: &Arc<Window>) {
         self.renderer.handle_recreate_swapchain(window);
+    }
+
+    pub fn set_model(&mut self, model: XYZIVoxelData) {
+        self.engine_parts.model_data =
+            ModelData::new_from_vox_data(self.engine_parts.device.clone(), model);
+        self.renderer
+            .recreate_descriptor_sets(&mut self.engine_parts);
+        self.recompute_push_constants();
     }
 }
 
@@ -283,13 +291,8 @@ impl HeadlessEngine {
         let (device, queue) =
             get_headless_device_and_queue(physical_device.clone(), queue_family_index);
 
-        let voxel_data = XYZIVoxelData::from_vox_file(
-            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
-        )
-        .unwrap();
-
         let engine_parts = EngineParts::new(
-            ModelData::new_from_vox_data(device.clone(), voxel_data),
+            ModelData::sample_model(device.clone()),
             Camera::default(),
             output_image_size,
             &physical_device,
@@ -364,7 +367,7 @@ impl HeadlessEngine {
             return None;
         }
 
-        engine_parts.push_contants.increment_frame_number();
+        engine_parts.push_constants.increment_frame_number();
 
         Some(time)
     }
@@ -413,13 +416,9 @@ impl WindowedEngine {
             surface.clone(),
             window.inner_size().into(),
         );
-        let voxel_data = XYZIVoxelData::from_vox_file(
-            VoxFile::load_vox_file(Path::new("models/monu9.vox")).unwrap(),
-        )
-        .unwrap();
 
         let engine_parts = EngineParts::new(
-            ModelData::new_from_vox_data(device.clone(), voxel_data),
+            ModelData::sample_model(device.clone()),
             Camera::default(),
             resolution,
             &physical_device,
@@ -554,7 +553,7 @@ impl WindowedEngine {
         self.fences[swap_image_index as usize] = future;
 
         self.previous_fence = swap_image_index as usize;
-        engine_parts.push_contants.increment_frame_number();
+        engine_parts.push_constants.increment_frame_number();
     }
 
     /// Returns true when the event should NOT be passed to the rest of the renderer. False when it should
@@ -586,7 +585,7 @@ impl WindowedEngine {
         self.should_record[swap_image_index as usize] = query_timings.is_some();
     }
 
-    fn handle_output_resize(&mut self, engine_parts: &mut EngineParts) {
+    fn recreate_descriptor_sets(&mut self, engine_parts: &mut EngineParts) {
         let (descriptor_sets, output_image) = Self::create_descriptor_sets_and_output_image(
             self.present_images_and_views.len() as u32,
             engine_parts,
@@ -594,13 +593,6 @@ impl WindowedEngine {
 
         self.output_image = output_image;
         self.descriptor_sets = descriptor_sets;
-
-        engine_parts.push_contants = PushConstants::new(
-            &engine_parts.image_size,
-            &engine_parts.camera,
-            engine_parts.shader_flags,
-            &engine_parts.model_data,
-        );
     }
 
     fn handle_recreate_swapchain(&mut self, window: &Arc<Window>) {

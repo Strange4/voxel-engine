@@ -12,25 +12,44 @@ void main() {
     uvec2 imgSize = uvec2(imageSize(out_image));
     if (any(greaterThanEqual(gl_GlobalInvocationID.xy, imgSize))) return;
 
-    uint random_seed = generate_seed(gl_GlobalInvocationID.xy, push_constants.frame_number);
-
     Ray ray = generate_ray(push_constants);
     bool show_steps = bool((push_constants.shader_flags >> 0) & 1);
     bool show_normals = bool((push_constants.shader_flags >> 1) & 1);
     bool show_hit_position = bool((push_constants.shader_flags >> 2) & 1);
 
 
+    if(show_steps || show_normals || show_hit_position) {
+        HitInfo hit = cast_ray(push_constants.model_scale, push_constants.floor_position, ray);
+        vec3 color = vec3(1);
+        if(hit.hit) {
+            if(show_steps) {
+                color = magma_quintic(float(hit.number_of_steps)/20.0);
+            } else if(show_normals) {
+                color = hit.normal * 0.5 + 0.5;
+            } else if(show_hit_position) {
+                color = hit.position / vec3(1 << (push_constants.model_scale * 2));
+            }
+        }
+        imageStore(out_image, ivec2(gl_GlobalInvocationID.xy), vec4(color, 1));
+        return;
+    }
+
+    uint random_seed = generate_seed(gl_GlobalInvocationID.xy, push_constants.frame_number);
+
+
     // BOUNCE!
 
-    // const vec3 sky_color = vec3(0.156862745);
-    const vec3 material_emission = vec3(0);
+    const vec3 ground_color = vec3(0.156862745);
+    // const vec3 sky_emission = vec3(0.5, 0.7, 1.0);
+    const vec3 material_emission = vec3(0.1);
+    const vec3 sky_emission = vec3(1);
     uint bounce_number;
     uint max_hits = 3;
     vec3 final_light_color = vec3(0);
     vec3 throughput = vec3(1);
 
     for(bounce_number=0;bounce_number<max_hits;bounce_number++) {
-        HitInfo hit = cast_ray(push_constants.model_scale, ray);
+        HitInfo hit = cast_ray(push_constants.model_scale, push_constants.floor_position, ray);
 
         if(hit.hit) {
             // The first byte should be `a` but its being interpreted as r
@@ -42,8 +61,7 @@ void main() {
             // the next bounce will be attenuated by the reflectance of this surface
             throughput *= surface_color;
         } else {
-            vec3 sky_color = mix(vec3(0.5, 0.7, 1.0), vec3(1.0), 0.5 * (ray.direction.y + 1.0));
-            final_light_color += sky_color * throughput;
+            final_light_color += sky_emission * throughput;
             break;
         }
 

@@ -1,5 +1,7 @@
 use std::{fmt::Debug, fs::File, io::Read, path::Path};
 
+use glam::{U8Vec3, UVec3, u8vec3, uvec3};
+
 #[derive(Debug)]
 pub enum LoadVoxError {
     CouldNotOpenFile,
@@ -27,6 +29,7 @@ pub struct VoxChunk {
     children: Vec<VoxChunk>,
 }
 
+#[derive(Debug)]
 pub struct SizeChunk {
     tag_name: String,
     x_size: u32,
@@ -207,6 +210,9 @@ impl XYZIVoxel {
     }
     pub fn i(&self) -> u8 {
         self.i
+    }
+    pub fn xyz(&self) -> UVec3 {
+        uvec3(self.x as u32, self.y as u32, self.z as u32)
     }
 }
 
