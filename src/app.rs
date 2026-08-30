@@ -2,7 +2,7 @@ use egui::{Align2, Slider, Ui};
 use egui_file_dialog::FileDialog;
 use egui_winit_vulkano::Gui;
 use glam::Vec3;
-use std::{collections::HashSet, f32, path::Path, sync::Arc, thread, time::Instant};
+use std::{collections::HashSet, path::Path, sync::Arc, time::Instant};
 use voxel_engine::{
     camera::Camera,
     engine::{Engine, WindowedEngine},

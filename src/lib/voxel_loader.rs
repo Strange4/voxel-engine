@@ -1,6 +1,6 @@
 use std::{fmt::Debug, fs::File, io::Read, path::Path};
 
-use glam::{U8Vec3, UVec3, u8vec3, uvec3};
+use glam::{UVec3, uvec3};
 
 #[derive(Debug)]
 pub enum LoadVoxError {
